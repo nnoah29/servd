@@ -1,0 +1,24 @@
+# Build directories
+cmake-build-*/
+build/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled
+*.o
+*.a
+*.so
+*.elf
+
+# Executable (build output)
+/servd
