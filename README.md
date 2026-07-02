@@ -92,7 +92,7 @@ Add to your `CMakeLists.txt`:
 ```cmake
 include(cmake/CPM.cmake)  # or download from https://github.com/cpm-cmake/CPM.cmake
 
-CPMAddPackage("gh:anomalyco/servd@0.1.0")
+CPMAddPackage("gh:nnoah29/servd@0.1.0")
 
 target_link_libraries(my_app PRIVATE servd::servd_core)
 ```
@@ -116,7 +116,7 @@ target_link_libraries(my_app PRIVATE servd::servd_core)
 ### Option C — git submodule / add_subdirectory
 
 ```bash
-git submodule add https://github.com/anomalyco/servd extern/servd
+git submodule add https://github.com/nnoah29/servd extern/servd
 ```
 
 ```cmake
