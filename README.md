@@ -83,6 +83,49 @@ sudo ./build/servd          # requires CAP_NET_ADMIN for io_uring + discovery
 
 ---
 
+## Integration Into Your Project
+
+### Option A — CPM (recommended)
+
+Add to your `CMakeLists.txt`:
+
+```cmake
+include(cmake/CPM.cmake)  # or download from https://github.com/cpm-cmake/CPM.cmake
+
+CPMAddPackage("gh:anomalyco/servd@0.1.0")
+
+target_link_libraries(my_app PRIVATE servd::servd_core)
+```
+
+### Option B — find_package (after install)
+
+```bash
+# Build and install servd once
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build
+sudo cmake --install build
+```
+
+Then in your project:
+
+```cmake
+find_package(servd REQUIRED)
+target_link_libraries(my_app PRIVATE servd::servd_core)
+```
+
+### Option C — git submodule / add_subdirectory
+
+```bash
+git submodule add https://github.com/anomalyco/servd extern/servd
+```
+
+```cmake
+add_subdirectory(extern/servd)
+target_link_libraries(my_app PRIVATE servd::servd_core)
+```
+
+---
+
 ## The Binary Protocol
 
 Every frame exchanged over the wire has this 16-byte header:

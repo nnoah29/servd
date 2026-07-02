@@ -1,35 +1,73 @@
-cmake_minimum_required(VERSION 4.2)
-project(servd)
+cmake_minimum_required(VERSION 3.16)
+project(servd VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ============================================================
+# Library
+# ============================================================
 add_library(servd_core
-        src/Server.cpp
-        src/UringEngine.cpp
-        Logger/Logger.cpp
-        include/servd/Context.hpp
-        include/servd/Protocol.hpp
-        include/servd/Server.hpp
-        include/servd/router/Router.hpp
-        include/servd/router/Endpoint.hpp
-        include/servd/interfaces/ISessionStore.hpp
-        include/servd/interfaces/IConnection.hpp
-        include/servd/interfaces/Session.hpp
-        include/servd/Task.hpp
+    src/Server.cpp
+    src/UringEngine.cpp
+    Logger/Logger.cpp
 )
 
-target_include_directories(servd_core PUBLIC include Logger)
+target_include_directories(servd_core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Logger
+)
 
-add_executable(servd app/main.cpp
-        include/servd/Context.hpp
-        include/servd/Protocol.hpp
-        include/servd/Server.hpp
-        include/servd/router/Router.hpp
-        include/servd/router/Endpoint.hpp
-        include/servd/interfaces/ISessionStore.hpp
-        include/servd/interfaces/IConnection.hpp
-        include/servd/interfaces/Session.hpp
-        include/servd/Task.hpp)
 target_link_libraries(servd_core PUBLIC uring)
+
+# ============================================================
+# Example executable
+# ============================================================
+add_executable(servd app/main.cpp)
 target_link_libraries(servd PRIVATE servd_core)
+
+# ============================================================
+# Install rules
+# ============================================================
+include(GNUInstallDirs)
+
+install(TARGETS servd_core
+    EXPORT servdTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(DIRECTORY include/servd
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT servdTargets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/servd
+    NAMESPACE servd::
+)
+
+# ============================================================
+# CMake config file for find_package(servd)
+# ============================================================
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/servdConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/servdConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/servdConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/servd
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/servdConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/servdConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/servd
+)
