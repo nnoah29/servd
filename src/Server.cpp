@@ -27,8 +27,8 @@ namespace servd
     Server::Server() : engine_(std::make_unique<UringEngine>(*this)) {}
     Server::~Server() = default;
 
-    Server& Server::enable_tcp(uint16_t port) {
-        tcp_ports_.push_back(port);
+    Server& Server::enable_tcp(uint16_t port, ProtocolMode mode) {
+        tcp_ports_.emplace_back(port, mode);
         return *this;
     }
 
@@ -37,8 +37,8 @@ namespace servd
         return *this;
     }
 
-    Server& Server::enable_unix_socket(const std::string& path) {
-        unix_paths_.push_back(path);
+    Server& Server::enable_unix_socket(const std::string& path, ProtocolMode mode) {
+        unix_paths_.emplace_back(path, mode);
         return *this;
     }
 
@@ -76,7 +76,7 @@ namespace servd
 
         engine_->running = true;
 
-        for (const uint16_t port : tcp_ports_) {
+        for (const auto& [port, mode] : tcp_ports_) {
             const int fd = socket(AF_INET, SOCK_STREAM, 0);
             if (fd < 0) throw std::runtime_error("Erreur creation socket TCP");
 
@@ -95,10 +95,10 @@ namespace servd
                 throw std::runtime_error("Erreur listen() TCP");
 
             LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute TCP sur le port %u", port);
-            engine_->start_accept_loop(fd);
+            engine_->start_accept_loop(fd, mode);
         }
 
-        for (const std::string& path : unix_paths_) {
+        for (const auto& [path, mode] : unix_paths_) {
             const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
             if (fd < 0) throw std::runtime_error("Erreur creation socket UNIX");
 
@@ -115,7 +115,7 @@ namespace servd
                 throw std::runtime_error("Erreur listen() UNIX");
 
             LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UNIX sur %s", path.c_str());
-            engine_->start_accept_loop(fd);
+            engine_->start_accept_loop(fd, mode);
         }
 
         for (const auto& task : periodic_tasks_) {

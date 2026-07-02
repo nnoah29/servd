@@ -14,6 +14,9 @@
 #include <liburing.h>
 #include <span>
 #include <vector>
+#include <string>
+#include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <cstddef>
 #include <cstdint>
@@ -74,12 +77,26 @@ namespace servd
                 UringEngine& engine_;
         };
 
+        class TextTcpConnection final : public IConnection {
+            public:
+                TextTcpConnection(int fd, UringEngine& engine);
+                [[nodiscard]] TransportType transport_type() const override { return TransportType::TCP; }
+                Task<void> send_frame(const FrameHeader& header, std::span<const std::byte> payload) override;
+                [[nodiscard]] std::string get_remote_address() const override { return "unknown (TODO)"; }
+            private:
+                int fd_;
+                UringEngine& engine_;
+        };
+
         Task<ClientFrame> read_frame(int client_fd);
+        Task<std::string> read_text_line(int client_fd);
+        Task<ClientFrame> read_text_frame(int client_fd);
         Task<size_t> async_recvmsg(int fd, std::span<std::byte> buffer, struct sockaddr_storage& addr);
         Task<int> async_sendto(int fd, std::span<const std::byte> buffer, const struct sockaddr_storage& addr);
         Task<void> process_command(const ClientFrame& frame, IConnection& connection, Session& session) const;
         DetachedTask handle_client(int client_fd);
-        DetachedTask start_accept_loop(int server_fd);
+        DetachedTask text_handle_client(int client_fd);
+        DetachedTask start_accept_loop(int server_fd, ProtocolMode mode = ProtocolMode::BINARY);
         DetachedTask start_udp_loop(int udp_fd);
         DetachedTask periodic_timer_loop(std::chrono::milliseconds interval, PeriodicTaskHandler handler);
 

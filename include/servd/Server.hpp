@@ -50,9 +50,9 @@ namespace servd {
             Server(const Server&) = delete;
             Server& operator=(const Server&) = delete;
 
-            Server& enable_tcp(uint16_t port);
+            Server& enable_tcp(uint16_t port, ProtocolMode mode = ProtocolMode::BINARY);
             Server& enable_udp(uint16_t port);
-            Server& enable_unix_socket(const std::string& path);
+            Server& enable_unix_socket(const std::string& path, ProtocolMode mode = ProtocolMode::BINARY);
             Server& enable_discovery(const DiscoveryConfig& config);
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
@@ -76,9 +76,9 @@ namespace servd {
             std::shared_ptr<ISessionStore> session_store_;
             std::shared_ptr<IAuthenticator> authenticator_; // <-- NOUVEAU
 
-            std::vector<uint16_t> tcp_ports_;
+            std::vector<std::pair<uint16_t, ProtocolMode>> tcp_ports_;
             std::vector<uint16_t> udp_ports_;
-            std::vector<std::string> unix_paths_;
+            std::vector<std::pair<std::string, ProtocolMode>> unix_paths_;
             DiscoveryConfig discovery_config_;
             std::vector<PeriodicTaskInfo> periodic_tasks_;
             size_t max_clients_ = 0;

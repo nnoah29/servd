@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <linux/time_types.h>
+#include <charconv>
 
 namespace servd
 {
@@ -164,6 +165,41 @@ namespace servd
         co_return frame;
     }
 
+    Task<std::string> Server::UringEngine::read_text_line(int client_fd)
+    {
+        std::string line;
+        char c;
+        while (true) {
+            co_await async_read_exact(client_fd, {reinterpret_cast<std::byte*>(&c), 1});
+            if (c == '\n') break;
+            line += c;
+        }
+        co_return line;
+    }
+
+    Task<ClientFrame> Server::UringEngine::read_text_frame(int client_fd)
+    {
+        ClientFrame frame{};
+
+        const std::string header_line = co_await read_text_line(client_fd);
+
+        uint16_t cmd = 0;
+        uint64_t sid = 0;
+        std::istringstream(header_line) >> cmd >> sid;
+        frame.header.command_id = cmd;
+        frame.header.session_id = sid;
+        frame.header.flags = 0;
+
+        const std::string payload_line = co_await read_text_line(client_fd);
+        frame.header.payload_length = static_cast<uint32_t>(payload_line.size());
+        frame.payload.resize(frame.header.payload_length);
+        if (!payload_line.empty()) {
+            std::memcpy(frame.payload.data(), payload_line.data(), frame.header.payload_length);
+        }
+
+        co_return frame;
+    }
+
     Task<void> Server::UringEngine::process_command(
         const ClientFrame& frame, IConnection& connection, Session& session) const
     {
@@ -240,7 +276,45 @@ namespace servd
         --active_connections_;
     }
 
-    DetachedTask Server::UringEngine::start_accept_loop(int server_fd)
+    DetachedTask Server::UringEngine::text_handle_client(int client_fd)
+    {
+        ++active_connections_;
+
+        TextTcpConnection connection(client_fd, *this);
+        auto current_session_id = static_cast<uint64_t>(-1);
+
+        while (running)
+        {
+            try {
+                ClientFrame frame = co_await read_text_frame(client_fd);
+
+                if (!server_.session_store_) {
+                    throw std::runtime_error("SessionStore non initialise");
+                }
+                Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+
+                if (frame.header.session_id != current_session_id) {
+                    if (current_session_id != 0) unregister_session(current_session_id);
+                    register_session(frame.header.session_id, client_fd);
+                    current_session_id = frame.header.session_id;
+                }
+
+                co_await process_command(frame, connection, session);
+
+                co_await server_.session_store_->save(session);
+
+            } catch (const std::exception& e) {
+                LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                break;
+            }
+        }
+        if (current_session_id != static_cast<uint64_t>(-1)) unregister_session(current_session_id);
+        close(client_fd);
+
+        --active_connections_;
+    }
+
+    DetachedTask Server::UringEngine::start_accept_loop(int server_fd, ProtocolMode mode)
     {
         while (running) {
             try {
@@ -253,7 +327,12 @@ namespace servd
                 }
 
                 LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
-                handle_client(client_fd);
+
+                if (mode == ProtocolMode::TEXT) {
+                    text_handle_client(client_fd);
+                } else {
+                    handle_client(client_fd);
+                }
             } catch (std::exception& e) {
                 LOG(Logger::LogLevel::ERROR, "[Erreur] %s", e.what());
             }
@@ -369,6 +448,26 @@ namespace servd
             std::memcpy(buffer.data() + sizeof(FrameHeader), payload.data(), payload.size());
         }
         co_await engine_.async_write(fd_, buffer);
+    }
+
+    Server::UringEngine::TextTcpConnection::TextTcpConnection(int fd, UringEngine& engine)
+        : fd_(fd), engine_(engine) {}
+
+    Task<void> Server::UringEngine::TextTcpConnection::send_frame(
+        const FrameHeader& header, std::span<const std::byte> payload)
+    {
+        std::ostringstream oss;
+        oss << header.command_id << ' ' << header.flags << ' ' << header.session_id << '\n';
+
+        if (!payload.empty()) {
+            const auto* chars = reinterpret_cast<const char*>(payload.data());
+            oss.write(chars, static_cast<std::streamsize>(payload.size()));
+        }
+        oss << '\n';
+
+        const std::string text = std::move(oss).str();
+        const auto* data = reinterpret_cast<const std::byte*>(text.data());
+        co_await engine_.async_write(fd_, {data, text.size()});
     }
 
     Server::UringEngine::UringUdpConnection::UringUdpConnection(

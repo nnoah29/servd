@@ -23,6 +23,11 @@ namespace servd {
         UDP = 2, UNIX = 3
     };
 
+    enum class ProtocolMode : uint8_t {
+        BINARY = 0,
+        TEXT   = 1
+    };
+
     #pragma pack(push, 1)
     struct FrameHeader {
         uint16_t command_id;
