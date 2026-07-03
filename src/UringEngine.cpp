@@ -15,6 +15,7 @@
 #include <vector>
 #include <array>
 #include <chrono>
+#include <endian.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <linux/time_types.h>
@@ -375,39 +376,73 @@ namespace servd
     {
         ++active_connections_;
 
-        AesGcm cipher(server_.encryption_key_.data(), AesGcm::KEY_SIZE);
-        EncryptedTcpConnection connection(client_fd, *this, server_.encryption_key_.data());
-        uint64_t nonce_counter = 0;
-        auto current_session_id = static_cast<uint64_t>(-1);
+        try {
+            // =======================================================
+            // RSA key exchange handshake
+            // =======================================================
 
-        while (running)
-        {
-            try {
-                ClientFrame frame = co_await read_encrypted_frame(client_fd, cipher, nonce_counter);
+            // 1. Send server RSA public key
+            auto pubkey = server_.rsa_key_.pubkey_der();
+            uint16_t pubkey_len_be = htobe16(static_cast<uint16_t>(pubkey.size()));
+            co_await async_write(client_fd, {reinterpret_cast<const std::byte*>(&pubkey_len_be), 2});
+            co_await async_write(client_fd, {reinterpret_cast<const std::byte*>(pubkey.data()), pubkey.size()});
 
-                if (!server_.session_store_) {
-                    throw std::runtime_error("SessionStore non initialise");
-                }
-                Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+            // 2. Receive encrypted session key from client
+            uint16_t enc_key_len_be = 0;
+            co_await async_read_exact(client_fd, {reinterpret_cast<std::byte*>(&enc_key_len_be), 2});
+            uint16_t enc_key_len = be16toh(enc_key_len_be);
+            std::vector<uint8_t> encrypted_key(enc_key_len);
+            co_await async_read_exact(client_fd, {reinterpret_cast<std::byte*>(encrypted_key.data()), enc_key_len});
 
-                if (frame.header.session_id != current_session_id) {
-                    if (current_session_id != 0) unregister_session(current_session_id);
-                    register_session(frame.header.session_id, client_fd);
-                    current_session_id = frame.header.session_id;
-                }
-
-                co_await process_command(frame, connection, session);
-
-                co_await server_.session_store_->save(session);
-
-            } catch (const std::exception& e) {
-                LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
-                break;
+            // 3. Decrypt session key with RSA private key
+            std::vector<uint8_t> session_key = server_.rsa_key_.decrypt(encrypted_key);
+            if (session_key.size() != 32) {
+                throw std::runtime_error("Session key must be 32 bytes for AES-256-GCM");
             }
-        }
-        if (current_session_id != static_cast<uint64_t>(-1)) unregister_session(current_session_id);
-        close(client_fd);
 
+            // 4. Create encrypted session (nonce_counter shared by read + write)
+            AesGcm cipher(session_key.data(), AesGcm::KEY_SIZE);
+            uint64_t nonce_counter = 0;
+            EncryptedTcpConnection connection(client_fd, *this, std::move(cipher), nonce_counter);
+            auto current_session_id = static_cast<uint64_t>(-1);
+
+            LOG(Logger::LogLevel::INFO, "[Crypte] Client %d : echange RSA termine, session AES-256-GCM etablie.", client_fd);
+
+            // =======================================================
+            // Main encrypted frame loop (AES-256-GCM)
+            // =======================================================
+            while (running)
+            {
+                try {
+                    ClientFrame frame = co_await read_encrypted_frame(client_fd, connection.cipher(), nonce_counter);
+
+                    if (!server_.session_store_) {
+                        throw std::runtime_error("SessionStore non initialise");
+                    }
+                    Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+
+                    if (frame.header.session_id != current_session_id) {
+                        if (current_session_id != 0) unregister_session(current_session_id);
+                        register_session(frame.header.session_id, client_fd);
+                        current_session_id = frame.header.session_id;
+                    }
+
+                    co_await process_command(frame, connection, session);
+
+                    co_await server_.session_store_->save(session);
+
+                } catch (const std::exception& e) {
+                    LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                    break;
+                }
+            }
+
+            if (current_session_id != static_cast<uint64_t>(-1)) unregister_session(current_session_id);
+        } catch (const std::exception& e) {
+            LOG(Logger::LogLevel::ERROR, "[Crypte/Echec] Client %d : %s", client_fd, e.what());
+        }
+
+        close(client_fd);
         --active_connections_;
     }
 
@@ -570,8 +605,8 @@ namespace servd
     }
 
     Server::UringEngine::EncryptedTcpConnection::EncryptedTcpConnection(
-        int fd, UringEngine& engine, const uint8_t* key)
-        : fd_(fd), engine_(engine), cipher_(key, AesGcm::KEY_SIZE) {}
+        int fd, UringEngine& engine, AesGcm&& cipher, uint64_t& nonce_counter)
+        : fd_(fd), engine_(engine), cipher_(std::move(cipher)), nonce_counter_(nonce_counter) {}
 
     Task<void> Server::UringEngine::EncryptedTcpConnection::send_frame(
         const FrameHeader& header, std::span<const std::byte> payload)

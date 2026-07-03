@@ -25,6 +25,7 @@
 #include "servd/router/Router.hpp"
 #include "servd/interfaces/ISessionStore.hpp"
 #include "servd/interfaces/IAuthenticator.hpp"
+#include "servd/crypto/RsaKey.hpp"
 
 namespace servd {
 
@@ -57,7 +58,7 @@ namespace servd {
             Server& enable_discovery(const DiscoveryConfig& config);
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
-            Server& set_encryption(std::array<uint8_t, 32> psk = {});
+            Server& enable_encryption();
             Server& set_max_clients(size_t max);
             Server& load_config(const std::string& path);
             Server& add_command_name(const std::string& name, uint16_t command_id);
@@ -86,7 +87,7 @@ namespace servd {
             std::vector<PeriodicTaskInfo> periodic_tasks_;
             size_t max_clients_ = 0;
             EncryptionMode encryption_mode_ = EncryptionMode::NONE;
-            std::array<uint8_t, 32> encryption_key_{};
+            RsaKey rsa_key_;
             std::unordered_map<std::string, uint16_t> text_command_names_;
 
             struct UringEngine;

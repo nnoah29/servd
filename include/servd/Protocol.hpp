@@ -31,7 +31,7 @@ namespace servd {
 
     enum class EncryptionMode : uint8_t {
         NONE = 0,
-        PSK  = 1
+        RSA  = 1
     };
 
     #pragma pack(push, 1)

@@ -92,15 +92,16 @@ namespace servd
 
         class EncryptedTcpConnection final : public IConnection {
             public:
-                EncryptedTcpConnection(int fd, UringEngine& engine, const uint8_t* key);
+                EncryptedTcpConnection(int fd, UringEngine& engine, AesGcm&& cipher, uint64_t& nonce_counter);
                 [[nodiscard]] TransportType transport_type() const override { return TransportType::TCP; }
                 Task<void> send_frame(const FrameHeader& header, std::span<const std::byte> payload) override;
                 [[nodiscard]] std::string get_remote_address() const override { return "unknown (TODO)"; }
+                [[nodiscard]] AesGcm& cipher() { return cipher_; }
             private:
                 int fd_;
                 UringEngine& engine_;
                 AesGcm cipher_;
-                uint64_t nonce_counter_ = 0;
+                uint64_t& nonce_counter_;
         };
 
         Task<ClientFrame> read_frame(int client_fd);

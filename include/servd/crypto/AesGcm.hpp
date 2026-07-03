@@ -59,6 +59,25 @@ namespace servd {
             if (tfm_fd_ >= 0) close(tfm_fd_);
         }
 
+        AesGcm(AesGcm&& other) noexcept
+            : tfm_fd_(other.tfm_fd_), op_fd_(other.op_fd_)
+        {
+            other.tfm_fd_ = -1;
+            other.op_fd_ = -1;
+        }
+
+        AesGcm& operator=(AesGcm&& other) noexcept {
+            if (this != &other) {
+                if (op_fd_ >= 0) close(op_fd_);
+                if (tfm_fd_ >= 0) close(tfm_fd_);
+                tfm_fd_ = other.tfm_fd_;
+                op_fd_ = other.op_fd_;
+                other.tfm_fd_ = -1;
+                other.op_fd_ = -1;
+            }
+            return *this;
+        }
+
         AesGcm(const AesGcm&) = delete;
         AesGcm& operator=(const AesGcm&) = delete;
 
