@@ -27,6 +27,8 @@
 #include <sys/socket.h>
 #include <servd/Server.hpp>
 #include <servd/interfaces/IConnection.hpp>
+#include <servd/crypto/AesGcm.hpp>
+#include <servd/crypto/Rng.hpp>
 #include <cerrno>
 
 namespace servd
@@ -88,7 +90,21 @@ namespace servd
                 UringEngine& engine_;
         };
 
+        class EncryptedTcpConnection final : public IConnection {
+            public:
+                EncryptedTcpConnection(int fd, UringEngine& engine, const uint8_t* key);
+                [[nodiscard]] TransportType transport_type() const override { return TransportType::TCP; }
+                Task<void> send_frame(const FrameHeader& header, std::span<const std::byte> payload) override;
+                [[nodiscard]] std::string get_remote_address() const override { return "unknown (TODO)"; }
+            private:
+                int fd_;
+                UringEngine& engine_;
+                AesGcm cipher_;
+                uint64_t nonce_counter_ = 0;
+        };
+
         Task<ClientFrame> read_frame(int client_fd);
+        Task<ClientFrame> read_encrypted_frame(int client_fd, AesGcm& cipher, uint64_t& nonce_counter);
         Task<std::string> read_text_line(int client_fd);
         Task<ClientFrame> read_text_frame(int client_fd);
         Task<size_t> async_recvmsg(int fd, std::span<std::byte> buffer, struct sockaddr_storage& addr);
@@ -96,6 +112,7 @@ namespace servd
         Task<void> process_command(const ClientFrame& frame, IConnection& connection, Session& session) const;
         DetachedTask handle_client(int client_fd);
         DetachedTask text_handle_client(int client_fd);
+        DetachedTask encrypted_handle_client(int client_fd);
         DetachedTask start_accept_loop(int server_fd, ProtocolMode mode = ProtocolMode::BINARY);
         DetachedTask start_udp_loop(int udp_fd);
         DetachedTask periodic_timer_loop(std::chrono::milliseconds interval, PeriodicTaskHandler handler);

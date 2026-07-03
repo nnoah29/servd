@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <vector>
 #include <cstddef>
+#include <array>
 
 namespace servd {
 
@@ -26,6 +27,11 @@ namespace servd {
     enum class ProtocolMode : uint8_t {
         BINARY = 0,
         TEXT   = 1
+    };
+
+    enum class EncryptionMode : uint8_t {
+        NONE = 0,
+        PSK  = 1
     };
 
     #pragma pack(push, 1)

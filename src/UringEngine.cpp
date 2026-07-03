@@ -165,6 +165,46 @@ namespace servd
         co_return frame;
     }
 
+    Task<ClientFrame> Server::UringEngine::read_encrypted_frame(
+        int client_fd, AesGcm& cipher, uint64_t& nonce_counter)
+    {
+        // Wire format: [nonce 12 bytes] [AEAD ciphertext: FrameHeader + payload + tag]
+        constexpr size_t NONCE_SIZE = AesGcm::NONCE_SIZE;
+        constexpr size_t HDR_SIZE = sizeof(FrameHeader);
+        constexpr size_t TAG_SIZE = AesGcm::TAG_SIZE;
+
+        // 1. Read nonce
+        std::array<std::byte, NONCE_SIZE> nonce_buf{};
+        co_await async_read_exact(client_fd, nonce_buf);
+
+        // 2. Read ciphertext for header + tag
+        std::vector<std::byte> hdr_ct(HDR_SIZE + TAG_SIZE);
+        co_await async_read_exact(client_fd, hdr_ct);
+
+        // 3. Decrypt header (AAD = nonce)
+        std::vector<std::byte> hdr_pt = cipher.decrypt(hdr_ct, nonce_buf, nonce_buf);
+
+        // 4. Parse header
+        ClientFrame frame{};
+        std::memcpy(&frame.header, hdr_pt.data(), HDR_SIZE);
+
+        // 5. Read + decrypt payload if present
+        if (frame.header.payload_length > 0) {
+            std::vector<std::byte> payload_ct(frame.header.payload_length + TAG_SIZE);
+            co_await async_read_exact(client_fd, payload_ct);
+
+            // Use incrementing counter as nonce for payload
+            std::array<std::byte, NONCE_SIZE> payload_nonce{};
+            std::memcpy(payload_nonce.data(), &nonce_counter, sizeof(nonce_counter));
+            ++nonce_counter;
+
+            frame.payload = cipher.decrypt(payload_ct, nonce_buf, payload_nonce);
+        }
+
+        ++nonce_counter;
+        co_return frame;
+    }
+
     Task<std::string> Server::UringEngine::read_text_line(int client_fd)
     {
         std::string line;
@@ -331,6 +371,46 @@ namespace servd
         --active_connections_;
     }
 
+    DetachedTask Server::UringEngine::encrypted_handle_client(int client_fd)
+    {
+        ++active_connections_;
+
+        AesGcm cipher(server_.encryption_key_.data(), AesGcm::KEY_SIZE);
+        EncryptedTcpConnection connection(client_fd, *this, server_.encryption_key_.data());
+        uint64_t nonce_counter = 0;
+        auto current_session_id = static_cast<uint64_t>(-1);
+
+        while (running)
+        {
+            try {
+                ClientFrame frame = co_await read_encrypted_frame(client_fd, cipher, nonce_counter);
+
+                if (!server_.session_store_) {
+                    throw std::runtime_error("SessionStore non initialise");
+                }
+                Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+
+                if (frame.header.session_id != current_session_id) {
+                    if (current_session_id != 0) unregister_session(current_session_id);
+                    register_session(frame.header.session_id, client_fd);
+                    current_session_id = frame.header.session_id;
+                }
+
+                co_await process_command(frame, connection, session);
+
+                co_await server_.session_store_->save(session);
+
+            } catch (const std::exception& e) {
+                LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                break;
+            }
+        }
+        if (current_session_id != static_cast<uint64_t>(-1)) unregister_session(current_session_id);
+        close(client_fd);
+
+        --active_connections_;
+    }
+
     DetachedTask Server::UringEngine::start_accept_loop(int server_fd, ProtocolMode mode)
     {
         while (running) {
@@ -345,7 +425,9 @@ namespace servd
 
                 LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
 
-                if (mode == ProtocolMode::TEXT) {
+                if (server_.encryption_mode_ != EncryptionMode::NONE) {
+                    encrypted_handle_client(client_fd);
+                } else if (mode == ProtocolMode::TEXT) {
                     text_handle_client(client_fd);
                 } else {
                     handle_client(client_fd);
@@ -485,6 +567,39 @@ namespace servd
         const std::string text = std::move(oss).str();
         const auto* data = reinterpret_cast<const std::byte*>(text.data());
         co_await engine_.async_write(fd_, {data, text.size()});
+    }
+
+    Server::UringEngine::EncryptedTcpConnection::EncryptedTcpConnection(
+        int fd, UringEngine& engine, const uint8_t* key)
+        : fd_(fd), engine_(engine), cipher_(key, AesGcm::KEY_SIZE) {}
+
+    Task<void> Server::UringEngine::EncryptedTcpConnection::send_frame(
+        const FrameHeader& header, std::span<const std::byte> payload)
+    {
+        // Wire format: [nonce 12 bytes] [AEAD ciphertext: FrameHeader + payload + 16 tag]
+        constexpr size_t NONCE_SIZE = AesGcm::NONCE_SIZE;
+
+        // Serialize header
+        std::vector<std::byte> plain(sizeof(FrameHeader) + payload.size());
+        std::memcpy(plain.data(), &header, sizeof(FrameHeader));
+        if (!payload.empty()) {
+            std::memcpy(plain.data() + sizeof(FrameHeader), payload.data(), payload.size());
+        }
+
+        // Generate nonce from counter
+        std::array<std::byte, NONCE_SIZE> nonce{};
+        std::memcpy(nonce.data(), &nonce_counter_, sizeof(nonce_counter_));
+        ++nonce_counter_;
+
+        // Encrypt
+        std::vector<std::byte> ciphertext = cipher_.encrypt(plain, nonce, nonce);
+
+        // Write: nonce + ciphertext
+        std::vector<std::byte> buffer(NONCE_SIZE + ciphertext.size());
+        std::memcpy(buffer.data(), nonce.data(), NONCE_SIZE);
+        std::memcpy(buffer.data() + NONCE_SIZE, ciphertext.data(), ciphertext.size());
+
+        co_await engine_.async_write(fd_, buffer);
     }
 
     Server::UringEngine::UringUdpConnection::UringUdpConnection(

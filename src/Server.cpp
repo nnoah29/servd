@@ -57,6 +57,12 @@ namespace servd
         return *this;
     }
 
+    Server& Server::set_encryption(std::array<uint8_t, 32> psk) {
+        encryption_key_ = psk;
+        encryption_mode_ = EncryptionMode::PSK;
+        return *this;
+    }
+
     Server& Server::set_max_clients(size_t max) {
         max_clients_ = max;
         return *this;
