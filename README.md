@@ -141,6 +141,91 @@ The payload follows immediately as raw bytes. There is no built-in serialization
 
 ---
 
+## Text Protocol Mode
+
+In addition to the binary protocol, each TCP/Unix port can be configured in **text mode** for human-readable debugging, scripting, or integration with tools like `netcat`.
+
+```cpp
+app.enable_tcp(8081, ProtocolMode::TEXT);
+```
+
+**Under the hood, the engine is unchanged.** The text mode is a **wire format adapter** that translates between human-readable text and the internal binary `ClientFrame`. The router, authenticator, session store, and all handlers work identically.
+
+### Wire Format
+
+```
+<command_id> <session_id>\n
+<payload>\n
+```
+
+Each frame is exactly two lines terminated by `\n`:
+
+| Line | Content | Example |
+|------|---------|---------|
+| 1 | `command_id` (number or name) + space + `session_id` (number) | `2 42` |
+| 2 | Payload text (anything up to `\n`) | `alice:my_secret_key` |
+
+**Response format** (server → client):
+
+```
+<command_id> <flags> <session_id>\n
+<payload>\n
+```
+
+### Command Names
+
+The `command_id` can be either a number or a string name registered with `add_command_name()`:
+
+```cpp
+app.add_command(CMD_LOGIN, handler).require_auth();
+app.add_command_name("login", CMD_LOGIN);  // for text mode
+```
+
+Both of these work with `netcat`:
+
+```bash
+# By number
+printf "2 0\nalice:key\n" | nc localhost 8081
+
+# By name (requires add_command_name)
+printf "login 0\nalice:key\n" | nc localhost 8081
+```
+
+### Important Caveats
+
+| Constraint | Reason |
+|-----------|--------|
+| `command_id` and `session_id` are **numbers** internally | The binary `FrameHeader` uses `uint16_t` / `uint64_t` |
+| Payload cannot contain `\n` | `\n` terminates the payload line |
+| Payload is text-only (no binary data) | No base64 or escaping built-in |
+| ~10× slower than binary mode | `read_text_line` reads one byte at a time |
+| UDP does not support text mode | Only TCP/Unix stream connections |
+
+### Example Handler
+
+```cpp
+app.add_command(CMD_LOGIN, [](Context& ctx) -> Task<ResponseFrame> {
+    // ctx.payload() contains the text sent by the client
+    std::string_view data{
+        reinterpret_cast<const char*>(ctx.payload().data()),
+        ctx.payload().size()
+    };
+
+    if (data.starts_with("alice")) {
+        ctx.session().set_authenticated(true, "alice");
+    }
+
+    std::string resp = "OK";
+    std::vector<std::byte> payload(resp.size());
+    std::memcpy(payload.data(), resp.data(), resp.size());
+    co_return ResponseFrame{0, payload};
+});
+```
+
+The handler code is **identical** to the binary mode. Only the `enable_tcp` line changes.
+
+---
+
 ## API Reference
 
 ### Server Configuration
