@@ -79,7 +79,7 @@ cmake -B build && cmake --build build
 sudo ./build/servd          # requires CAP_NET_ADMIN for io_uring + discovery
 ```
 
-**Dependencies:** Linux ≥ 5.1, `liburing`, C++20 compiler (GCC ≥ 11 / Clang ≥ 14).
+**Dependencies:** Linux ≥ 5.1, `liburing`, Botan ≥ 3.0 (`apt install libbotan-3-dev`), C++20 compiler (GCC ≥ 11 / Clang ≥ 14).
 
 ---
 
@@ -223,6 +223,140 @@ app.add_command(CMD_LOGIN, [](Context& ctx) -> Task<ResponseFrame> {
 ```
 
 The handler code is **identical** to the binary mode. Only the `enable_tcp` line changes.
+
+---
+
+---
+
+## Encryption & Security (AES-256-GCM + X25519)
+
+servd provides built-in **end-to-end encryption** per session using **X25519** key agreement and **AES-256-GCM** authenticated encryption — all powered by **Botan 3** (no OpenSSL).
+
+### How It Works
+
+Two reserved command IDs implement the security layer transparently:
+
+| Command ID | Name | Purpose |
+|-----------|------|---------|
+| `0x00F0` | `CMD_KEY_EXCHANGE` | X25519 handshake |
+| `0x00F1` | `CMD_ENCRYPTED_MESSAGE` | AES-256-GCM encrypted application frame |
+
+### Handshake Protocol (X25519)
+
+The client initiates the handshake by sending `CMD_KEY_EXCHANGE` with its raw 32-byte X25519 public key:
+
+```
+Client → Server:  Frame{CMD_KEY_EXCHANGE, session_id, payload = client_public_key[32]}
+```
+
+The server:
+1. Generates an ephemeral X25519 key pair
+2. Computes the shared secret: `X25519(server_private, client_public)`
+3. Stores the 32-byte shared secret as the AES-256-GCM key in the session store (`session.set_aes_key()`)
+4. Replies with its own 32-byte X25519 public key:
+
+```
+Server → Client:  Frame{CMD_KEY_EXCHANGE, session_id, payload = server_public_key[32]}
+```
+
+The client derives the same shared secret locally. From this point, both sides share a 256-bit key that **never transited the network**.
+
+### Encrypted Messages (AES-256-GCM)
+
+Once the handshake is complete, the client wraps every application command inside `CMD_ENCRYPTED_MESSAGE`:
+
+```
+Outer frame:
+  command_id = 0x00F1 (CMD_ENCRYPTED_MESSAGE)
+  payload    = [12-byte IV][16-byte GCM Tag][AES-256-GCM ciphertext]
+                  ↑ random nonce     ↑ integrity proof    ↑ inner frame
+```
+
+The **inner frame** (plaintext after decryption) is a mini binary structure:
+
+| Size | Field | Description |
+|------|-------|-------------|
+| 2 bytes | `inner_command_id` | The real command (e.g. `CMD_PING`, `CMD_LOGIN`) |
+| variable | `inner_payload` | The real payload |
+
+### Server-Side Processing Pipeline
+
+When the server receives a `CMD_ENCRYPTED_MESSAGE`:
+
+```
+1. Extract IV (12B) + tag (16B) + ciphertext from payload
+2. Look up AES key from session (session.aes_key())
+3. AES-256-GCM decrypt → inner_command_id + inner_payload
+4. Route inner_command_id to the registered handler
+5. Encrypt the handler's response the same way
+6. Send back CMD_ENCRYPTED_MESSAGE with [IV + tag + ciphertext]
+```
+
+The tag is verified automatically by Botan — if authentication fails, the connection is dropped immediately.
+
+### Client Implementation Guide
+
+Any client capable of X25519 + AES-256-GCM can talk to a servd server. Example in Python:
+
+```python
+import os, struct
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+# ── Handshake ──────────────────────────────────────────────
+client_sk = X25519PrivateKey.generate()
+client_pk = client_sk.public_key().public_bytes_raw()  # 32 bytes
+
+# Send CMD_KEY_EXCHANGE
+header = struct.pack('<HHIQ', 0x00F0, 0, 32, session_id)
+socket.send(header + client_pk)
+
+# Receive server reply
+resp_header = socket.read(16)
+resp_payload = socket.read(32)
+server_pk = resp_payload  # 32 bytes
+
+# Derive shared key
+shared_key = client_sk.exchange(
+    X25519PublicKey.from_public_bytes(server_pk)
+)  # 32 bytes for AES-256
+
+aes = AESGCM(shared_key)
+
+# ── Send encrypted command ────────────────────────────────
+inner = struct.pack('<H', CMD_PING) + b'PONG'
+iv = os.urandom(12)
+ct = aes.encrypt(iv, inner, None)
+outer_payload = iv + ct  # [12B IV][16B tag][ciphertext]
+
+header = struct.pack('<HHIQ', 0x00F1, 0, len(outer_payload), session_id)
+socket.send(header + outer_payload)
+
+# ── Receive encrypted response ────────────────────────────
+resp_header = socket.read(16)
+resp_payload = socket.read(struct.unpack('<I', resp_header[4:8])[0])
+resp_iv = resp_payload[:12]
+resp_ct = resp_payload[12:]  # includes tag
+inner_resp = aes.decrypt(resp_iv, resp_ct, None)  # [inner_cmd_id][payload]
+```
+
+### Session API (additions for encryption)
+
+```cpp
+bool has_aes_key() const;                          // true after handshake
+void set_aes_key(const std::array<uint8_t, 32>&);  // store AES session key
+const std::array<uint8_t, 32>& aes_key() const;    // retrieve AES session key
+```
+
+### Security Notes
+
+| Concern | Detail |
+|---------|--------|
+| **Key freshness** | New X25529 key pair on every handshake (ephemeral-ephemeral) |
+| **Nonce uniqueness** | Server generates a cryptographic random IV per message (12 bytes via `getrandom`) |
+| **Integrity** | AES-GCM tag rejects tampered or replayed ciphertexts |
+| **Forward secrecy** | Ephemeral X25519 keys are not persisted — past traffic cannot be decrypted after session end |
+| **No cleartext commands** | Every frame with `CMD_ENCRYPTED_MESSAGE` is fully authenticated and encrypted |
 
 ---
 
@@ -382,12 +516,17 @@ app.enable_discovery({
 ```
 servd/
 ├── CMakeLists.txt              # Build configuration
+├── cmake/CPM.cmake             # CPM dependency manager
 ├── config/servd.conf           # Example config file
 ├── include/servd/              # Public API headers
 │   ├── Server.hpp              # Main server class
 │   ├── Protocol.hpp            # Frame header, enums, discovery packets
 │   ├── Context.hpp             # Per-request context with property bag
 │   ├── Task.hpp                # Coroutine task<T> / task<void>
+│   ├── crypto/
+│   │   ├── AesGcm.hpp           # AES-256-GCM (via Botan)
+│   │   ├── X25519.hpp           # X25519 key agreement (via Botan)
+│   │   └── Rng.hpp              # CSPRNG (getrandom)
 │   ├── auth/
 │   │   └── DefaultAuthenticator.hpp
 │   ├── store/
@@ -416,7 +555,7 @@ servd/
 
 - **OS:** Linux ≥ 5.1 (for `io_uring`)
 - **Compiler:** GCC ≥ 11 or Clang ≥ 14 (C++20 coroutines)
-- **Library:** `liburing` (developement headers)
+- **Library:** `liburing` (development headers), Botan ≥ 3.0 (`apt install libbotan-3-dev`)
 - **Build:** CMake ≥ 4.2
 - **Runtime:** `CAP_NET_ADMIN` capability (for discovery broadcast)
 
