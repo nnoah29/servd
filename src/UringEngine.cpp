@@ -11,11 +11,11 @@
 
 #include "detail/Engine.hpp"
 #include <Logger.hpp>
+#include <servd/crypto/Rng.hpp>
 #include <cstring>
 #include <vector>
 #include <array>
 #include <chrono>
-#include <endian.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <linux/time_types.h>
@@ -166,46 +166,6 @@ namespace servd
         co_return frame;
     }
 
-    Task<ClientFrame> Server::UringEngine::read_encrypted_frame(
-        int client_fd, AesGcm& cipher, uint64_t& nonce_counter)
-    {
-        // Wire format: [nonce 12 bytes] [AEAD ciphertext: FrameHeader + payload + tag]
-        constexpr size_t NONCE_SIZE = AesGcm::NONCE_SIZE;
-        constexpr size_t HDR_SIZE = sizeof(FrameHeader);
-        constexpr size_t TAG_SIZE = AesGcm::TAG_SIZE;
-
-        // 1. Read nonce
-        std::array<std::byte, NONCE_SIZE> nonce_buf{};
-        co_await async_read_exact(client_fd, nonce_buf);
-
-        // 2. Read ciphertext for header + tag
-        std::vector<std::byte> hdr_ct(HDR_SIZE + TAG_SIZE);
-        co_await async_read_exact(client_fd, hdr_ct);
-
-        // 3. Decrypt header (AAD = nonce)
-        std::vector<std::byte> hdr_pt = cipher.decrypt(hdr_ct, nonce_buf, nonce_buf);
-
-        // 4. Parse header
-        ClientFrame frame{};
-        std::memcpy(&frame.header, hdr_pt.data(), HDR_SIZE);
-
-        // 5. Read + decrypt payload if present
-        if (frame.header.payload_length > 0) {
-            std::vector<std::byte> payload_ct(frame.header.payload_length + TAG_SIZE);
-            co_await async_read_exact(client_fd, payload_ct);
-
-            // Use incrementing counter as nonce for payload
-            std::array<std::byte, NONCE_SIZE> payload_nonce{};
-            std::memcpy(payload_nonce.data(), &nonce_counter, sizeof(nonce_counter));
-            ++nonce_counter;
-
-            frame.payload = cipher.decrypt(payload_ct, nonce_buf, payload_nonce);
-        }
-
-        ++nonce_counter;
-        co_return frame;
-    }
-
     Task<std::string> Server::UringEngine::read_text_line(int client_fd)
     {
         std::string line;
@@ -261,6 +221,139 @@ namespace servd
     Task<void> Server::UringEngine::process_command(
         const ClientFrame& frame, IConnection& connection, Session& session) const
     {
+        // ================================================================
+        // Interception CMD_KEY_EXCHANGE (0x00F0) — Handshake X25519
+        // ================================================================
+        if (frame.header.command_id == CMD_KEY_EXCHANGE) {
+            if (frame.payload.size() != 32) {
+                LOG(Logger::LogLevel::WARN, "[KeyExchange] Taille cle invalide: %zu", frame.payload.size());
+                co_return;
+            }
+
+            X25519::Key client_pub{};
+            std::memcpy(client_pub.data(), frame.payload.data(), 32);
+
+            X25519::Key server_priv = X25519::generate_private();
+            X25519::Key server_pub = X25519::public_key(server_priv);
+            X25519::Key shared = X25519::shared_secret(server_priv, client_pub);
+
+            session.set_aes_key(shared);
+            LOG(Logger::LogLevel::INFO, "[KeyExchange] Session %lu : secret partage X25519 etabli.", session.id());
+
+            const FrameHeader resp{CMD_KEY_EXCHANGE, 0, 32, session.id()};
+            const std::span<const std::byte> payload{
+                reinterpret_cast<const std::byte*>(server_pub.data()), 32};
+            co_await connection.send_frame(resp, payload);
+            co_return;
+        }
+
+        // ================================================================
+        // Interception CMD_ENCRYPTED_MESSAGE (0x00F1) — Dechiffrement AES-GCM
+        // ================================================================
+        if (frame.header.command_id == CMD_ENCRYPTED_MESSAGE) {
+            if (!session.has_aes_key()) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Session %lu : pas de cle AES, handshake requis.", session.id());
+                co_return;
+            }
+            if (frame.payload.size() < AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Payload trop court: %zu", frame.payload.size());
+                co_return;
+            }
+
+            // Wire format: [12B IV][16B Tag][Ciphertext]
+            std::span<const std::byte> payload_span(frame.payload);
+            auto iv = payload_span.subspan(0, AesGcm::NONCE_SIZE);
+            auto tag = payload_span.subspan(AesGcm::NONCE_SIZE, AesGcm::TAG_SIZE);
+            auto ct = payload_span.subspan(AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE);
+
+            // AesGcm::decrypt attend [ciphertext || tag]
+            std::vector<std::byte> aead_input(ct.size() + AesGcm::TAG_SIZE);
+            std::memcpy(aead_input.data(), ct.data(), ct.size());
+            std::memcpy(aead_input.data() + ct.size(), tag.data(), AesGcm::TAG_SIZE);
+
+            AesGcm cipher(session.aes_key().data(), AesGcm::KEY_SIZE);
+            std::vector<std::byte> plain;
+            try {
+                plain = cipher.decrypt(aead_input, {}, iv);
+            } catch (const std::exception& e) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Echec dechiffrement (tag invalide) : %s", e.what());
+                co_return;
+            }
+
+            if (plain.size() < sizeof(uint16_t)) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Inner frame trop court");
+                co_return;
+            }
+
+            // Extraire inner_command_id + inner_payload
+            uint16_t inner_cmd = 0;
+            std::memcpy(&inner_cmd, plain.data(), sizeof(uint16_t));
+            std::span<const std::byte> inner_payload(plain.data() + sizeof(uint16_t),
+                plain.size() - sizeof(uint16_t));
+
+            LOG(Logger::LogLevel::DEBUG, "[Crypte] Commande interne %u dechiffree (%zu octets).",
+                inner_cmd, inner_payload.size());
+
+            // Router la commande interne
+            auto endpoint = server_.router_.get(inner_cmd);
+            if (!endpoint) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Commande interne inconnue : %u", inner_cmd);
+                co_return;
+            }
+
+            FrameHeader inner_header{inner_cmd, 0,
+                static_cast<uint32_t>(inner_payload.size()), session.id()};
+            Context ctx(inner_header, inner_payload, session, connection);
+
+            bool is_auth_ok = true;
+            if (endpoint->requires_auth) {
+                is_auth_ok = co_await server_.authenticator_->authenticate(ctx);
+            }
+            const bool is_transport_ok = (endpoint->allowed_transport == TransportType::ANY ||
+                endpoint->allowed_transport == connection.transport_type());
+
+            if (!is_auth_ok || !is_transport_ok) {
+                LOG(Logger::LogLevel::WARN, "[Crypte] Rejet commande %u: auth=%d transport=%d",
+                    inner_cmd, is_auth_ok, is_transport_ok);
+                co_return;
+            }
+
+            auto [flags, resp_payload] = co_await endpoint->handler(ctx);
+
+            // Chiffrer la reponse: inner_cmd + resp_payload
+            std::vector<std::byte> inner_resp(sizeof(uint16_t) + resp_payload.size());
+            std::memcpy(inner_resp.data(), &inner_cmd, sizeof(uint16_t));
+            if (!resp_payload.empty()) {
+                std::memcpy(inner_resp.data() + sizeof(uint16_t), resp_payload.data(), resp_payload.size());
+            }
+
+            // Generer IV aleatoire
+            auto iv_out = Rng::gen<AesGcm::NONCE_SIZE>();
+            std::array<std::byte, AesGcm::NONCE_SIZE> iv_span{};
+            std::memcpy(iv_span.data(), iv_out.data(), AesGcm::NONCE_SIZE);
+
+            auto encrypted = cipher.encrypt(inner_resp, {}, iv_span);
+            size_t ct_len = encrypted.size() - AesGcm::TAG_SIZE;
+
+            // Wire format: [12B IV][16B Tag][Ciphertext]
+            std::vector<std::byte> outer_payload(
+                AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE + ct_len);
+            std::memcpy(outer_payload.data(), iv_span.data(), AesGcm::NONCE_SIZE);
+            std::memcpy(outer_payload.data() + AesGcm::NONCE_SIZE,
+                encrypted.data() + ct_len, AesGcm::TAG_SIZE);
+            std::memcpy(outer_payload.data() + AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE,
+                encrypted.data(), ct_len);
+
+            const FrameHeader res_header{
+                CMD_ENCRYPTED_MESSAGE, flags,
+                static_cast<uint32_t>(outer_payload.size()), session.id()};
+            co_await connection.send_frame(res_header, outer_payload);
+            co_return;
+        }
+
+        // ================================================================
+        // Routage normal
+        // ================================================================
         auto endpoint = server_.router_.get(frame.header.command_id);
 
         if (!endpoint) {
@@ -372,80 +465,6 @@ namespace servd
         --active_connections_;
     }
 
-    DetachedTask Server::UringEngine::encrypted_handle_client(int client_fd)
-    {
-        ++active_connections_;
-
-        try {
-            // =======================================================
-            // RSA key exchange handshake
-            // =======================================================
-
-            // 1. Send server RSA public key
-            auto pubkey = server_.rsa_key_.pubkey_der();
-            uint16_t pubkey_len_be = htobe16(static_cast<uint16_t>(pubkey.size()));
-            co_await async_write(client_fd, {reinterpret_cast<const std::byte*>(&pubkey_len_be), 2});
-            co_await async_write(client_fd, {reinterpret_cast<const std::byte*>(pubkey.data()), pubkey.size()});
-
-            // 2. Receive encrypted session key from client
-            uint16_t enc_key_len_be = 0;
-            co_await async_read_exact(client_fd, {reinterpret_cast<std::byte*>(&enc_key_len_be), 2});
-            uint16_t enc_key_len = be16toh(enc_key_len_be);
-            std::vector<uint8_t> encrypted_key(enc_key_len);
-            co_await async_read_exact(client_fd, {reinterpret_cast<std::byte*>(encrypted_key.data()), enc_key_len});
-
-            // 3. Decrypt session key with RSA private key
-            std::vector<uint8_t> session_key = server_.rsa_key_.decrypt(encrypted_key);
-            if (session_key.size() != 32) {
-                throw std::runtime_error("Session key must be 32 bytes for AES-256-GCM");
-            }
-
-            // 4. Create encrypted session (nonce_counter shared by read + write)
-            AesGcm cipher(session_key.data(), AesGcm::KEY_SIZE);
-            uint64_t nonce_counter = 0;
-            EncryptedTcpConnection connection(client_fd, *this, std::move(cipher), nonce_counter);
-            auto current_session_id = static_cast<uint64_t>(-1);
-
-            LOG(Logger::LogLevel::INFO, "[Crypte] Client %d : echange RSA termine, session AES-256-GCM etablie.", client_fd);
-
-            // =======================================================
-            // Main encrypted frame loop (AES-256-GCM)
-            // =======================================================
-            while (running)
-            {
-                try {
-                    ClientFrame frame = co_await read_encrypted_frame(client_fd, connection.cipher(), nonce_counter);
-
-                    if (!server_.session_store_) {
-                        throw std::runtime_error("SessionStore non initialise");
-                    }
-                    Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
-
-                    if (frame.header.session_id != current_session_id) {
-                        if (current_session_id != 0) unregister_session(current_session_id);
-                        register_session(frame.header.session_id, client_fd);
-                        current_session_id = frame.header.session_id;
-                    }
-
-                    co_await process_command(frame, connection, session);
-
-                    co_await server_.session_store_->save(session);
-
-                } catch (const std::exception& e) {
-                    LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
-                    break;
-                }
-            }
-
-            if (current_session_id != static_cast<uint64_t>(-1)) unregister_session(current_session_id);
-        } catch (const std::exception& e) {
-            LOG(Logger::LogLevel::ERROR, "[Crypte/Echec] Client %d : %s", client_fd, e.what());
-        }
-
-        close(client_fd);
-        --active_connections_;
-    }
-
     DetachedTask Server::UringEngine::start_accept_loop(int server_fd, ProtocolMode mode)
     {
         while (running) {
@@ -460,9 +479,7 @@ namespace servd
 
                 LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
 
-                if (server_.encryption_mode_ != EncryptionMode::NONE) {
-                    encrypted_handle_client(client_fd);
-                } else if (mode == ProtocolMode::TEXT) {
+                if (mode == ProtocolMode::TEXT) {
                     text_handle_client(client_fd);
                 } else {
                     handle_client(client_fd);
@@ -602,39 +619,6 @@ namespace servd
         const std::string text = std::move(oss).str();
         const auto* data = reinterpret_cast<const std::byte*>(text.data());
         co_await engine_.async_write(fd_, {data, text.size()});
-    }
-
-    Server::UringEngine::EncryptedTcpConnection::EncryptedTcpConnection(
-        int fd, UringEngine& engine, AesGcm&& cipher, uint64_t& nonce_counter)
-        : fd_(fd), engine_(engine), cipher_(std::move(cipher)), nonce_counter_(nonce_counter) {}
-
-    Task<void> Server::UringEngine::EncryptedTcpConnection::send_frame(
-        const FrameHeader& header, std::span<const std::byte> payload)
-    {
-        // Wire format: [nonce 12 bytes] [AEAD ciphertext: FrameHeader + payload + 16 tag]
-        constexpr size_t NONCE_SIZE = AesGcm::NONCE_SIZE;
-
-        // Serialize header
-        std::vector<std::byte> plain(sizeof(FrameHeader) + payload.size());
-        std::memcpy(plain.data(), &header, sizeof(FrameHeader));
-        if (!payload.empty()) {
-            std::memcpy(plain.data() + sizeof(FrameHeader), payload.data(), payload.size());
-        }
-
-        // Generate nonce from counter
-        std::array<std::byte, NONCE_SIZE> nonce{};
-        std::memcpy(nonce.data(), &nonce_counter_, sizeof(nonce_counter_));
-        ++nonce_counter_;
-
-        // Encrypt
-        std::vector<std::byte> ciphertext = cipher_.encrypt(plain, nonce, nonce);
-
-        // Write: nonce + ciphertext
-        std::vector<std::byte> buffer(NONCE_SIZE + ciphertext.size());
-        std::memcpy(buffer.data(), nonce.data(), NONCE_SIZE);
-        std::memcpy(buffer.data() + NONCE_SIZE, ciphertext.data(), ciphertext.size());
-
-        co_await engine_.async_write(fd_, buffer);
     }
 
     Server::UringEngine::UringUdpConnection::UringUdpConnection(

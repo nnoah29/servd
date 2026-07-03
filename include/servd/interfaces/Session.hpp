@@ -12,6 +12,8 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include <array>
+#include <cstring>
 
 namespace servd {
 
@@ -28,9 +30,18 @@ namespace servd {
             }
             [[nodiscard]] const std::string& user_identifier() const { return user_identifier_; }
 
+        [[nodiscard]] bool has_aes_key() const { return has_aes_key_; }
+            void set_aes_key(const std::array<uint8_t, 32>& key) {
+                aes_key_ = key;
+                has_aes_key_ = true;
+            }
+            [[nodiscard]] const std::array<uint8_t, 32>& aes_key() const { return aes_key_; }
+
         private:
             uint64_t id_;
             bool authenticated_ = false;
+            bool has_aes_key_ = false;
+            std::array<uint8_t, 32> aes_key_{};
             std::string user_identifier_;
     };
 

@@ -21,7 +21,8 @@ target_include_directories(servd_core
         ${CMAKE_CURRENT_SOURCE_DIR}/Logger
 )
 
-target_link_libraries(servd_core PUBLIC uring)
+find_package(Botan REQUIRED)
+target_link_libraries(servd_core PUBLIC Botan::Botan uring)
 
 # ============================================================
 # Example executable

@@ -29,11 +29,6 @@ namespace servd {
         TEXT   = 1
     };
 
-    enum class EncryptionMode : uint8_t {
-        NONE = 0,
-        RSA  = 1
-    };
-
     #pragma pack(push, 1)
     struct FrameHeader {
         uint16_t command_id;
@@ -61,4 +56,8 @@ namespace servd {
         int32_t udp_port;
     };
     #pragma pack(pop)
+
+    // Commandes reservées pour la couche sécurité
+    inline constexpr uint16_t CMD_KEY_EXCHANGE      = 0x00F0;
+    inline constexpr uint16_t CMD_ENCRYPTED_MESSAGE  = 0x00F1;
 }

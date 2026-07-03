@@ -57,10 +57,7 @@ namespace servd
         return *this;
     }
 
-    Server& Server::enable_encryption() {
-        encryption_mode_ = EncryptionMode::RSA;
-        return *this;
-    }
+
 
     Server& Server::set_max_clients(size_t max) {
         max_clients_ = max;
@@ -77,12 +74,6 @@ namespace servd
         if (!authenticator_) {
             LOG(Logger::LogLevel::INFO, "[Serveur] Aucun Authenticator defini, utilisation de DefaultAuthenticator par defaut.");
             authenticator_ = std::make_shared<DefaultAuthenticator>();
-        }
-
-        if (encryption_mode_ == EncryptionMode::RSA) {
-            LOG(Logger::LogLevel::INFO, "[Serveur] Generation de la paire de cles RSA 2048...");
-            rsa_key_.generate();
-            LOG(Logger::LogLevel::INFO, "[Serveur] Cle RSA generee (%zu octets de cle publique).", rsa_key_.pubkey_der().size());
         }
 
         engine_->running = true;

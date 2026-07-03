@@ -6,13 +6,10 @@
 #include <span>
 #include <stdexcept>
 #include <cstring>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <linux/if_alg.h>
-
-#ifndef SOL_ALG
-#define SOL_ALG 279
-#endif
+#include <memory>
+#include <botan/cipher_mode.h>
+#include <botan/auto_rng.h>
+#include <botan/secmem.h>
 
 namespace servd {
 
@@ -27,53 +24,25 @@ namespace servd {
                 throw std::runtime_error("AesGcm: key must be 32 bytes (AES-256)");
             }
 
-            tfm_fd_ = socket(AF_ALG, SOCK_SEQPACKET, 0);
-            if (tfm_fd_ < 0) {
-                throw std::runtime_error("AesGcm: socket(AF_ALG) failed");
+            enc_ = Botan::Cipher_Mode::create("AES-256/GCM", Botan::Cipher_Dir::Encryption);
+            dec_ = Botan::Cipher_Mode::create("AES-256/GCM", Botan::Cipher_Dir::Decryption);
+
+            if (!enc_ || !dec_) {
+                throw std::runtime_error("AesGcm: Botan AES-256/GCM not available");
             }
 
-            struct sockaddr_alg sa = {};
-            sa.salg_family = AF_ALG;
-            std::strncpy(reinterpret_cast<char*>(sa.salg_type), "aead", sizeof(sa.salg_type));
-            std::strncpy(reinterpret_cast<char*>(sa.salg_name), "gcm(aes)", sizeof(sa.salg_name));
-
-            if (bind(tfm_fd_, reinterpret_cast<struct sockaddr*>(&sa), sizeof(sa)) < 0) {
-                close(tfm_fd_);
-                throw std::runtime_error("AesGcm: bind(AF_ALG, gcm(aes)) failed");
-            }
-
-            if (setsockopt(tfm_fd_, SOL_ALG, ALG_SET_KEY, key, key_size) < 0) {
-                close(tfm_fd_);
-                throw std::runtime_error("AesGcm: setsockopt(ALG_SET_KEY) failed");
-            }
-
-            op_fd_ = accept(tfm_fd_, nullptr, nullptr);
-            if (op_fd_ < 0) {
-                close(tfm_fd_);
-                throw std::runtime_error("AesGcm: accept(AF_ALG) failed");
-            }
-        }
-
-        ~AesGcm() {
-            if (op_fd_ >= 0) close(op_fd_);
-            if (tfm_fd_ >= 0) close(tfm_fd_);
+            enc_->set_key(key, key_size);
+            dec_->set_key(key, key_size);
         }
 
         AesGcm(AesGcm&& other) noexcept
-            : tfm_fd_(other.tfm_fd_), op_fd_(other.op_fd_)
-        {
-            other.tfm_fd_ = -1;
-            other.op_fd_ = -1;
-        }
+            : enc_(std::move(other.enc_)), dec_(std::move(other.dec_))
+        {}
 
         AesGcm& operator=(AesGcm&& other) noexcept {
             if (this != &other) {
-                if (op_fd_ >= 0) close(op_fd_);
-                if (tfm_fd_ >= 0) close(tfm_fd_);
-                tfm_fd_ = other.tfm_fd_;
-                op_fd_ = other.op_fd_;
-                other.tfm_fd_ = -1;
-                other.op_fd_ = -1;
+                enc_ = std::move(other.enc_);
+                dec_ = std::move(other.dec_);
             }
             return *this;
         }
@@ -90,115 +59,68 @@ namespace servd {
                 throw std::runtime_error("AesGcm: nonce must be 12 bytes");
             }
 
-            // Output = plaintext + tag
-            std::vector<std::byte> out(plaintext.size() + TAG_SIZE);
-            size_t out_len = out.size();
+            auto nonce_u8 = std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(nonce.data()), nonce.size());
 
-            // Prepare request
-            struct cmsghdr* cmsg;
-            union {
-                struct af_alg_iv iv;
-                char buf[CMSG_SPACE(sizeof(struct af_alg_iv) + NONCE_SIZE)];
-            } cmsg_buf = {};
-
-            struct msghdr msg = {};
-            struct iovec iov[2];
-
-            msg.msg_control = cmsg_buf.buf;
-            msg.msg_controllen = sizeof(cmsg_buf.buf);
-
-            cmsg = CMSG_FIRSTHDR(&msg);
-            cmsg->cmsg_level = SOL_ALG;
-            cmsg->cmsg_type = ALG_SET_IV;
-            cmsg->cmsg_len = CMSG_LEN(sizeof(struct af_alg_iv) + NONCE_SIZE);
-            std::memcpy(CMSG_DATA(cmsg), nonce.data(), NONCE_SIZE);
-
-            // AAD
-            iov[0].iov_base = const_cast<std::byte*>(aad.data());
-            iov[0].iov_len = aad.size();
-
-            // Plaintext
-            iov[1].iov_base = const_cast<std::byte*>(plaintext.data());
-            iov[1].iov_len = plaintext.size();
-
-            msg.msg_iov = iov;
-            msg.msg_iovlen = 2;
-
-            // Set output size hint
-            if (setsockopt(op_fd_, SOL_ALG, ALG_SET_AEAD_AUTHSIZE, nullptr, 0) < 0) {
-                throw std::runtime_error("AesGcm: setsockopt(ALG_SET_AEAD_AUTHSIZE) failed");
+            Botan::secure_vector<uint8_t> buf(plaintext.size());
+            if (!plaintext.empty()) {
+                std::memcpy(buf.data(), plaintext.data(), plaintext.size());
             }
 
-            // Send plaintext + aad
-            if (sendmsg(op_fd_, &msg, 0) < 0) {
-                throw std::runtime_error("AesGcm: sendmsg(encrypt) failed");
+            enc_->start(nonce_u8);
+
+            if (!aad.empty()) {
+                Botan::secure_vector<uint8_t> aad_buf(aad.size());
+                std::memcpy(aad_buf.data(), aad.data(), aad.size());
+                enc_->update(aad_buf);
             }
 
-            // Read ciphertext + tag
-            ssize_t n = read(op_fd_, out.data(), out_len);
-            if (n < 0 || static_cast<size_t>(n) != out_len) {
-                throw std::runtime_error("AesGcm: read(encrypt) failed");
-            }
+            enc_->finish(buf);
+            // buf now contains: ciphertext || tag
 
+            std::vector<std::byte> out(buf.size());
+            std::memcpy(out.data(), buf.data(), buf.size());
             return out;
         }
 
         std::vector<std::byte> decrypt(
-            std::span<const std::byte> ciphertext,
+            std::span<const std::byte> ciphertext_with_tag,
             std::span<const std::byte> aad,
             std::span<const std::byte> nonce)
         {
             if (nonce.size() != NONCE_SIZE) {
                 throw std::runtime_error("AesGcm: nonce must be 12 bytes");
             }
-            if (ciphertext.size() < TAG_SIZE) {
+            if (ciphertext_with_tag.size() < TAG_SIZE) {
                 throw std::runtime_error("AesGcm: ciphertext too short (no tag)");
             }
 
-            size_t ct_len = ciphertext.size() - TAG_SIZE;
+            auto nonce_u8 = std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(nonce.data()), nonce.size());
+
+            size_t ct_len = ciphertext_with_tag.size() - TAG_SIZE;
+            Botan::secure_vector<uint8_t> buf(ciphertext_with_tag.size());
+            std::memcpy(buf.data(), ciphertext_with_tag.data(), ciphertext_with_tag.size());
+
+            dec_->start(nonce_u8);
+
+            if (!aad.empty()) {
+                Botan::secure_vector<uint8_t> aad_buf(aad.size());
+                std::memcpy(aad_buf.data(), aad.data(), aad.size());
+                dec_->update(aad_buf);
+            }
+
+            dec_->finish(buf);
+            // buf now contains plaintext (size = ct_len), throws if tag invalid
+
             std::vector<std::byte> out(ct_len);
-
-            union {
-                struct af_alg_iv iv;
-                char buf[CMSG_SPACE(sizeof(struct af_alg_iv) + NONCE_SIZE)];
-            } cmsg_buf = {};
-
-            struct msghdr msg = {};
-            struct iovec iov[2];
-
-            msg.msg_control = cmsg_buf.buf;
-            msg.msg_controllen = sizeof(cmsg_buf.buf);
-
-            auto* cmsg = CMSG_FIRSTHDR(&msg);
-            cmsg->cmsg_level = SOL_ALG;
-            cmsg->cmsg_type = ALG_SET_IV;
-            cmsg->cmsg_len = CMSG_LEN(sizeof(struct af_alg_iv) + NONCE_SIZE);
-            std::memcpy(CMSG_DATA(cmsg), nonce.data(), NONCE_SIZE);
-
-            iov[0].iov_base = const_cast<std::byte*>(aad.data());
-            iov[0].iov_len = aad.size();
-
-            iov[1].iov_base = const_cast<std::byte*>(ciphertext.data());
-            iov[1].iov_len = ciphertext.size();
-
-            msg.msg_iov = iov;
-            msg.msg_iovlen = 2;
-
-            if (sendmsg(op_fd_, &msg, 0) < 0) {
-                throw std::runtime_error("AesGcm: sendmsg(decrypt) failed");
-            }
-
-            ssize_t n = read(op_fd_, out.data(), out.size());
-            if (n < 0 || static_cast<size_t>(n) != out.size()) {
-                throw std::runtime_error("AesGcm: read(decrypt) failed - auth tag mismatch");
-            }
-
+            std::memcpy(out.data(), buf.data(), ct_len);
             return out;
         }
 
     private:
-        int tfm_fd_ = -1;
-        int op_fd_ = -1;
+        std::unique_ptr<Botan::Cipher_Mode> enc_;
+        std::unique_ptr<Botan::Cipher_Mode> dec_;
     };
 
 }
