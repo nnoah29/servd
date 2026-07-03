@@ -185,7 +185,24 @@ namespace servd
 
         uint16_t cmd = 0;
         uint64_t sid = 0;
-        std::istringstream(header_line) >> cmd >> sid;
+        std::istringstream iss(header_line);
+        std::string token;
+        iss >> token;
+
+        // Essayer de parser comme nombre d'abord
+        auto [p, ec] = std::from_chars(token.data(), token.data() + token.size(), cmd);
+        if (ec != std::errc()) {
+            // Pas un nombre → chercher dans le mapping des noms de commandes
+            auto it = server_.text_command_names_.find(token);
+            if (it != server_.text_command_names_.end()) {
+                cmd = it->second;
+            } else {
+                LOG(Logger::LogLevel::WARN, "[Texte] Nom de commande inconnu : %s", token.c_str());
+                co_return frame;
+            }
+        }
+
+        iss >> sid;
         frame.header.command_id = cmd;
         frame.header.session_id = sid;
         frame.header.flags = 0;

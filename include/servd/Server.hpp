@@ -15,6 +15,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <span>
 #include <cstdint>
 #include <cstddef>
@@ -58,6 +59,7 @@ namespace servd {
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
             Server& set_max_clients(size_t max);
             Server& load_config(const std::string& path);
+            Server& add_command_name(const std::string& name, uint16_t command_id);
 
             Endpoint& add_command(uint16_t command_id, Handler handler);
             void add_periodic_task(std::chrono::milliseconds interval, PeriodicTaskHandler handler);
@@ -82,6 +84,7 @@ namespace servd {
             DiscoveryConfig discovery_config_;
             std::vector<PeriodicTaskInfo> periodic_tasks_;
             size_t max_clients_ = 0;
+            std::unordered_map<std::string, uint16_t> text_command_names_;
 
             struct UringEngine;
             std::unique_ptr<UringEngine> engine_;
