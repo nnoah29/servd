@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================
+# Dependencies via CPM
+# ============================================================
+include(cmake/CPM.cmake)
+
+find_package(Botan REQUIRED)
+
+# ============================================================
 # Library
 # ============================================================
 add_library(servd_core
@@ -21,7 +28,6 @@ target_include_directories(servd_core
         ${CMAKE_CURRENT_SOURCE_DIR}/Logger
 )
 
-find_package(Botan REQUIRED)
 target_link_libraries(servd_core PUBLIC Botan::Botan uring)
 
 # ============================================================
