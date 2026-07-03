@@ -57,7 +57,7 @@ namespace servd {
             Server& enable_discovery(const DiscoveryConfig& config);
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
-            Server& set_encryption(std::array<uint8_t, 32> psk);
+            Server& set_encryption(std::array<uint8_t, 32> psk = {});
             Server& set_max_clients(size_t max);
             Server& load_config(const std::string& path);
             Server& add_command_name(const std::string& name, uint16_t command_id);

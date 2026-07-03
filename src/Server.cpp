@@ -12,6 +12,7 @@
 #include "detail/Engine.hpp"
 #include <servd/store/InMemorySessionStore.hpp>
 #include <servd/auth/DefaultAuthenticator.hpp>
+#include <servd/crypto/Rng.hpp>
 #include <Logger.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -58,8 +59,15 @@ namespace servd
     }
 
     Server& Server::set_encryption(std::array<uint8_t, 32> psk) {
-        encryption_key_ = psk;
-        encryption_mode_ = EncryptionMode::PSK;
+        bool key_is_zero = std::all_of(psk.begin(), psk.end(), [](uint8_t b) { return b == 0; });
+        if (key_is_zero) {
+            // Appel sans clé → le serveur générera une clé aléatoire dans init()
+            encryption_mode_ = EncryptionMode::PSK;
+            encryption_key_.fill(0);
+        } else {
+            encryption_key_ = psk;
+            encryption_mode_ = EncryptionMode::PSK;
+        }
         return *this;
     }
 
@@ -78,6 +86,17 @@ namespace servd
         if (!authenticator_) {
             LOG(Logger::LogLevel::INFO, "[Serveur] Aucun Authenticator defini, utilisation de DefaultAuthenticator par defaut.");
             authenticator_ = std::make_shared<DefaultAuthenticator>();
+        }
+
+        if (encryption_mode_ == EncryptionMode::PSK) {
+            bool key_is_zero = std::all_of(encryption_key_.begin(), encryption_key_.end(),
+                [](uint8_t b) { return b == 0; });
+            if (key_is_zero) {
+                Rng::fill(encryption_key_.data(), encryption_key_.size());
+                LOG(Logger::LogLevel::INFO, "[Serveur] Cle de chiffrement auto-generee (%zu octets).", encryption_key_.size());
+            } else {
+                LOG(Logger::LogLevel::INFO, "[Serveur] Chiffrement avec cle fournie par l'utilisateur.");
+            }
         }
 
         engine_->running = true;
