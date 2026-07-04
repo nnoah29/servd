@@ -72,8 +72,8 @@ namespace servd {
                 std::function<bool(const Session&)> predicate) const;
 
             void init();
-            void run();
-            void stop();
+            void run() const;
+            void stop() const;
 
         private:
             Router router_;

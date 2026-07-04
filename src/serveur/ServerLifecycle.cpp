@@ -91,11 +91,13 @@ namespace servd
         }
     }
 
-    void Server::run() {
+    void Server::run() const
+    {
         engine_->run();
     }
 
-    void Server::stop() {
+    void Server::stop() const
+    {
         engine_->running = false;
     }
 

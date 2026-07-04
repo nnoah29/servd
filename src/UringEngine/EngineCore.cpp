@@ -12,9 +12,19 @@
 #include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <stdexcept>
+#include <csignal>
 
 namespace servd
 {
+
+    namespace {
+        volatile std::sig_atomic_t g_signal_received = 0;
+
+        extern "C" void signal_handler(int sig) {
+            (void)sig;
+            g_signal_received = 1;
+        }
+    }
 
     Server::UringEngine::UringEngine(Server& s) : server_(s) {
         if (io_uring_queue_init(256, &ring, 0) < 0)
@@ -34,9 +44,23 @@ namespace servd
     }
 
     void Server::UringEngine::run() {
+        struct sigaction sa_sigpipe{};
+        sigemptyset(&sa_sigpipe.sa_mask);
+        sa_sigpipe.sa_handler = SIG_IGN;
+        sigaction(SIGPIPE, &sa_sigpipe, nullptr);
+
+        struct sigaction sa{};
+        sa.sa_handler = signal_handler;
+        sigfillset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, nullptr);
+        sigaction(SIGTERM, &sa, nullptr);
+
+        g_signal_received = 0;
         running = true;
+
         struct io_uring_cqe *cqe;
-        while (running) {
+        while (running && !g_signal_received) {
             const int res = io_uring_wait_cqe(&ring, &cqe);
             if (res < 0) continue;
             auto *op = static_cast<UringOperation*>(io_uring_cqe_get_data(cqe));
@@ -47,6 +71,11 @@ namespace servd
             }
             io_uring_cqe_seen(&ring, cqe);
         }
+
+        running = false;
+
+        if (g_signal_received)
+            LOG(Logger::LogLevel::INFO, "[UringEngine] Signal recu, arret du serveur.");
     }
 
 }
