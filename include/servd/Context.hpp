@@ -56,7 +56,7 @@ namespace servd {
 
             template<typename T>
             [[nodiscard]] const T* get_if(const std::string& key) const {
-                auto it = locals_.find(key);
+                const auto it = locals_.find(key);
                 if (it != locals_.end()) {
                     return std::any_cast<T>(&it->second);
                 }

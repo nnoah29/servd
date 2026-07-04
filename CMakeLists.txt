@@ -15,7 +15,11 @@ find_package(Botan REQUIRED)
 # Library
 # ============================================================
 add_library(servd_core
-    src/Server.cpp
+    src/serveur/ServerConfiguration.cpp
+    src/serveur/ServerLifecycle.cpp
+    src/serveur/ServerConfigFile.cpp
+    src/serveur/ServerMessaging.cpp
+    src/serveur/ServerRouting.cpp
     src/UringEngine/EngineCore.cpp
     src/UringEngine/IoUring.cpp
     src/UringEngine/IoUringMsg.cpp
@@ -34,6 +38,7 @@ target_include_directories(servd_core
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/Logger
 )
 
