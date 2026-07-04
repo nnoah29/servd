@@ -9,7 +9,7 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <stdexcept>
 
@@ -22,8 +22,10 @@ namespace servd
         struct sockaddr_storage client_addr{};
         socklen_t client_addr_len = sizeof(client_addr);
         struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+
         io_uring_prep_accept(sqe, server_fd,
             reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_len, 0);
+
         io_uring_sqe_set_data(sqe, &op);
         io_uring_submit(&ring);
         co_return co_await op;
@@ -33,9 +35,11 @@ namespace servd
     {
         UringOperation op;
         struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+
         io_uring_prep_recv(sqe, fd, buffer.data(), buffer.size(), 0);
         io_uring_sqe_set_data(sqe, &op);
         io_uring_submit(&ring);
+
         co_return co_await op;
     }
 
@@ -43,15 +47,18 @@ namespace servd
     {
         UringOperation op;
         struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+
         io_uring_prep_send(sqe, fd, buffer.data(), buffer.size(), 0);
         io_uring_sqe_set_data(sqe, &op);
         io_uring_submit(&ring);
+
         co_return co_await op;
     }
 
     Task<void> Server::UringEngine::async_read_exact(int fd, std::span<std::byte> buffer)
     {
         size_t total_read = 0;
+
         while (total_read < buffer.size()) {
             const int bytes = co_await async_read(fd, buffer.subspan(total_read));
             if (bytes == 0) {

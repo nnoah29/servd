@@ -9,7 +9,7 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <stdexcept>
 

@@ -16,16 +16,16 @@ find_package(Botan REQUIRED)
 # ============================================================
 add_library(servd_core
     src/Server.cpp
-    src/EngineCore.cpp
-    src/IoUring.cpp
-    src/IoUringMsg.cpp
-    src/SessionBroadcast.cpp
-    src/FrameIO.cpp
-    src/ClientHandlers.cpp
-    src/CommandRoute.cpp
-    src/EncryptedHandler.cpp
-    src/ConnectionImpl.cpp
-    src/UdpConnection.cpp
+    src/UringEngine/EngineCore.cpp
+    src/UringEngine/IoUring.cpp
+    src/UringEngine/IoUringMsg.cpp
+    src/UringEngine/SessionBroadcast.cpp
+    src/UringEngine/FrameIO.cpp
+    src/UringEngine/ClientHandlers.cpp
+    src/UringEngine/CommandRoute.cpp
+    src/UringEngine/EncryptedHandler.cpp
+    src/UringEngine/ConnectionImpl.cpp
+    src/UringEngine/UdpConnection.cpp
     Logger/Logger.cpp
 )
 

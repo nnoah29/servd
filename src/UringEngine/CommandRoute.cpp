@@ -9,7 +9,7 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <cstring>
 #include <servd/Protocol.hpp>
@@ -20,43 +20,50 @@
 
 namespace servd
 {
-
     Task<void> Server::UringEngine::handle_key_exchange(
-        const ClientFrame& frame, IConnection& conn, Session& session) const
+        const ClientFrame& frame, IConnection& connection, Session& session)
     {
         if (frame.payload.size() != 32) {
             LOG(Logger::LogLevel::WARN, "[KeyExchange] Taille cle invalide: %zu", frame.payload.size());
             co_return;
         }
+
         X25519::Key client_pub{};
         std::memcpy(client_pub.data(), frame.payload.data(), 32);
-        X25519::Key server_priv = X25519::generate_private();
-        X25519::Key server_pub = X25519::public_key(server_priv);
-        X25519::Key shared = X25519::shared_secret(server_priv, client_pub);
+
+        const X25519::Key server_priv = X25519::generate_private();
+        const X25519::Key server_pub = X25519::public_key(server_priv);
+        const X25519::Key shared = X25519::shared_secret(server_priv, client_pub);
+
         session.set_aes_key(shared);
+
         LOG(Logger::LogLevel::INFO, "[KeyExchange] Session %lu: secret X25519 etabli.", session.id());
-        co_await conn.send_frame({CMD_KEY_EXCHANGE, 0, 32, session.id()},
+
+        co_await connection.send_frame({CMD_KEY_EXCHANGE, 0, 32, session.id()},
             {reinterpret_cast<const std::byte*>(server_pub.data()), 32});
     }
 
     Task<void> Server::UringEngine::handle_normal_command(
-        const ClientFrame& frame, IConnection& conn, Session& session) const
+        const ClientFrame& frame, IConnection& connection, Session& session) const
     {
-        auto endpoint = server_.router_.get(frame.header.command_id);
+        const auto endpoint = server_.router_.get(frame.header.command_id);
         if (!endpoint) {
             LOG(Logger::LogLevel::WARN, "[Rejet] Commande inconnue: %u", frame.header.command_id);
             co_return;
         }
-        Context ctx(frame.header, frame.payload, session, conn);
-        bool ok = (!endpoint->requires_auth || co_await server_.authenticator_->authenticate(ctx))
+        Context ctx(frame.header, frame.payload, session, connection);
+
+        const bool ok = (!endpoint->requires_auth || co_await server_.authenticator_->authenticate(ctx))
                && (endpoint->allowed_transport == TransportType::ANY
-                || endpoint->allowed_transport == conn.transport_type());
+                || endpoint->allowed_transport == connection.transport_type());
         if (!ok) {
             LOG(Logger::LogLevel::WARN, "[Rejet] Securite/Transport invalide pour CMD %u", frame.header.command_id);
             co_return;
         }
+
         auto [flags, payload] = co_await endpoint->handler(ctx);
-        co_await conn.send_frame(
+
+        co_await connection.send_frame(
             {frame.header.command_id, flags, static_cast<uint32_t>(payload.size()), session.id()}, payload);
     }
 

@@ -9,14 +9,13 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <cstring>
 #include <vector>
 #include <sstream>
 
 namespace servd
 {
-
     Server::UringEngine::UringTcpConnection::UringTcpConnection(int fd, UringEngine& engine)
         : fd_(fd), engine_(engine) {}
 
@@ -39,11 +38,13 @@ namespace servd
     {
         std::ostringstream oss;
         oss << header.command_id << ' ' << header.flags << ' ' << header.session_id << '\n';
+
         if (!payload.empty()) {
             const auto* chars = reinterpret_cast<const char*>(payload.data());
             oss.write(chars, static_cast<std::streamsize>(payload.size()));
         }
         oss << '\n';
+
         const std::string text = std::move(oss).str();
         const auto* data = reinterpret_cast<const std::byte*>(text.data());
         co_await engine_.async_write(fd_, {data, text.size()});
@@ -52,5 +53,4 @@ namespace servd
     Server::UringEngine::UringUdpConnection::UringUdpConnection(
         int fd, UringEngine& engine, const struct sockaddr_storage& addr)
         : fd_(fd), engine_(engine), client_addr_(addr) {}
-
 }

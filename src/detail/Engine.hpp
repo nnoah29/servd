@@ -96,7 +96,7 @@ namespace servd
         Task<size_t> async_recvmsg(int fd, std::span<std::byte> buffer, struct sockaddr_storage& addr);
         Task<int> async_sendto(int fd, std::span<const std::byte> buffer, const struct sockaddr_storage& addr);
         Task<void> process_command(const ClientFrame& frame, IConnection& connection, Session& session) const;
-        Task<void> handle_key_exchange(const ClientFrame& frame, IConnection& connection, Session& session) const;
+        static Task<void> handle_key_exchange(const ClientFrame& frame, IConnection& connection, Session& session);
         Task<void> handle_encrypted_message(const ClientFrame& frame, IConnection& connection, Session& session) const;
         Task<void> handle_normal_command(const ClientFrame& frame, IConnection& connection, Session& session) const;
         DetachedTask handle_client(int client_fd);

@@ -9,7 +9,7 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <cstring>
 #include <vector>
@@ -57,36 +57,42 @@ namespace
         return DecryptedMessage{std::move(cipher), inner_cmd, std::move(inner_payload)};
     }
 
-    Task<void> do_route_and_send(Router& router,
-        IAuthenticator& authenticator,
-        IConnection& conn, AesGcm& cipher,
-        uint16_t inner_cmd, std::span<const std::byte> inner_payload,
-        Session& session)
+    Task<void> do_route_and_send(Router& router, IAuthenticator& authenticator, IConnection& conn,
+        AesGcm& cipher, uint16_t inner_cmd, std::span<const std::byte> inner_payload, Session& session)
     {
-        auto ep = router.get(inner_cmd);
+        const auto ep = router.get(inner_cmd);
+
         if (!ep) {
             LOG(Logger::LogLevel::WARN, "[Crypte] Cmd inconnue: %u", inner_cmd);
             co_return;
         }
+
         Context ctx({inner_cmd, 0, static_cast<uint32_t>(inner_payload.size()), session.id()},
             inner_payload, session, conn);
-        bool ok = (!ep->requires_auth || co_await authenticator.authenticate(ctx))
-               && (ep->allowed_transport == TransportType::ANY
-                || ep->allowed_transport == conn.transport_type());
-        if (!ok) { LOG(Logger::LogLevel::WARN, "[Crypte] Rejet cmd %u", inner_cmd); co_return; }
+
+        const bool ok = (!ep->requires_auth || co_await authenticator.authenticate(ctx))
+            && (ep->allowed_transport == TransportType::ANY || ep->allowed_transport == conn.transport_type());
+
+        if (!ok) {
+            LOG(Logger::LogLevel::WARN, "[Crypte] Rejet cmd %u", inner_cmd); co_return;
+        }
         auto [flags, resp] = co_await ep->handler(ctx);
         std::vector<std::byte> inner(sizeof(uint16_t) + resp.size());
+
         std::memcpy(inner.data(), &inner_cmd, sizeof(uint16_t));
         if (!resp.empty())
             std::memcpy(inner.data() + sizeof(uint16_t), resp.data(), resp.size());
-        auto iv_out = Rng::gen<AesGcm::NONCE_SIZE>();
-        auto enc = cipher.encrypt(inner, {},
+
+        const auto iv_out = Rng::gen<AesGcm::NONCE_SIZE>();
+        const auto enc = cipher.encrypt(inner, {},
             {reinterpret_cast<const std::byte*>(iv_out.data()), AesGcm::NONCE_SIZE});
-        size_t cl = enc.size() - AesGcm::TAG_SIZE;
+        const size_t cl = enc.size() - AesGcm::TAG_SIZE;
+
         std::vector<std::byte> out(AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE + cl);
         std::memcpy(out.data(), iv_out.data(), AesGcm::NONCE_SIZE);
         std::memcpy(out.data() + AesGcm::NONCE_SIZE, enc.data() + cl, AesGcm::TAG_SIZE);
         std::memcpy(out.data() + AesGcm::NONCE_SIZE + AesGcm::TAG_SIZE, enc.data(), cl);
+
         co_await conn.send_frame(
             {CMD_ENCRYPTED_MESSAGE, flags, static_cast<uint32_t>(out.size()), session.id()}, out);
     }
@@ -101,5 +107,4 @@ namespace
         co_await do_route_and_send(server_.router_, *server_.authenticator_, conn,
             msg->cipher, msg->inner_cmd, msg->inner_payload, session);
     }
-
 }

@@ -9,7 +9,7 @@
 **         |___/
 */
 
-#include "detail/Engine.hpp"
+#include "../detail/Engine.hpp"
 #include <Logger.hpp>
 #include <cstring>
 #include <vector>
@@ -20,31 +20,39 @@
 
 namespace servd
 {
-
     DetachedTask Server::UringEngine::handle_client(int client_fd)
     {
         ++active_connections_;
         UringTcpConnection connection(client_fd, *this);
-        uint64_t current_sid = static_cast<uint64_t>(-1);
+        auto current_sid = static_cast<uint64_t>(-1);
+
         while (running) {
             try {
                 ClientFrame frame = co_await read_frame(client_fd);
+
                 if (!server_.session_store_)
                     throw std::runtime_error("SessionStore non initialise");
+
                 Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+
                 if (frame.header.session_id != current_sid) {
                     if (current_sid != 0) unregister_session(current_sid);
                     register_session(frame.header.session_id, client_fd);
                     current_sid = frame.header.session_id;
                 }
+
                 co_await process_command(frame, connection, session);
                 co_await server_.session_store_->save(session);
+
             } catch (const std::exception& e) {
                 LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
                 break;
             }
         }
-        if (current_sid != static_cast<uint64_t>(-1)) unregister_session(current_sid);
+
+        if (current_sid != static_cast<uint64_t>(-1))
+            unregister_session(current_sid);
+
         close(client_fd);
         --active_connections_;
     }
@@ -53,18 +61,23 @@ namespace servd
     {
         ++active_connections_;
         TextTcpConnection connection(client_fd, *this);
-        uint64_t current_sid = static_cast<uint64_t>(-1);
+        auto current_sid = static_cast<uint64_t>(-1);
+
         while (running) {
             try {
                 ClientFrame frame = co_await read_text_frame(client_fd);
+
                 if (!server_.session_store_)
                     throw std::runtime_error("SessionStore non initialise");
+
                 Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
+
                 if (frame.header.session_id != current_sid) {
                     if (current_sid != 0) unregister_session(current_sid);
                     register_session(frame.header.session_id, client_fd);
                     current_sid = frame.header.session_id;
                 }
+
                 co_await process_command(frame, connection, session);
                 co_await server_.session_store_->save(session);
             } catch (const std::exception& e) {
@@ -72,7 +85,9 @@ namespace servd
                 break;
             }
         }
-        if (current_sid != static_cast<uint64_t>(-1)) unregister_session(current_sid);
+
+        if (current_sid != static_cast<uint64_t>(-1))
+            unregister_session(current_sid);
         close(client_fd);
         --active_connections_;
     }
@@ -81,18 +96,21 @@ namespace servd
     {
         while (running) {
             try {
+
                 const int client_fd = co_await async_accept(server_fd);
                 if (server_.max_clients_ > 0 && active_connections_ >= server_.max_clients_) {
                     LOG(Logger::LogLevel::WARN, "[Rejet] Limite de clients atteinte (%zu)", server_.max_clients_);
                     close(client_fd);
                     continue;
                 }
+
                 LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
-                if (mode == ProtocolMode::TEXT) {
+
+                if (mode == ProtocolMode::TEXT)
                     text_handle_client(client_fd);
-                } else {
+                else
                     handle_client(client_fd);
-                }
+
             } catch (std::exception& e) {
                 LOG(Logger::LogLevel::ERROR, "[Erreur] %s", e.what());
             }
@@ -102,23 +120,31 @@ namespace servd
     DetachedTask Server::UringEngine::start_udp_loop(int udp_fd)
     {
         std::array<std::byte, 65536> buffer{};
+
         while (running) {
             try {
                 struct sockaddr_storage client_addr{};
-                size_t bytes = co_await async_recvmsg(udp_fd, buffer, client_addr);
+                const size_t bytes = co_await async_recvmsg(udp_fd, buffer, client_addr);
+
                 if (bytes < sizeof(FrameHeader)) continue;
+
                 FrameHeader header{};
                 std::memcpy(&header, buffer.data(), sizeof(FrameHeader));
-                uint32_t pl = std::min(header.payload_length,
+                const uint32_t pl = std::min(header.payload_length,
                     static_cast<uint32_t>(bytes - sizeof(FrameHeader)));
+
                 header.payload_length = pl;
                 std::vector<std::byte> payload(pl);
-                if (pl) std::memcpy(payload.data(), buffer.data() + sizeof(FrameHeader), pl);
+
+                if (pl)
+                    std::memcpy(payload.data(), buffer.data() + sizeof(FrameHeader), pl);
                 UringUdpConnection conn(udp_fd, *this, client_addr);
-                if (!server_.session_store_) continue;
+                if (!server_.session_store_)
+                    continue;
                 Session session = co_await server_.session_store_->get_or_create(header.session_id);
                 co_await process_command({header, std::move(payload)}, conn, session);
                 co_await server_.session_store_->save(session);
+
             } catch (const std::exception& e) {
                 LOG(Logger::LogLevel::ERROR, "[Erreur UDP] %s", e.what());
             }
@@ -131,6 +157,7 @@ namespace servd
         struct __kernel_timespec ts{};
         ts.tv_sec = interval.count() / 1000;
         ts.tv_nsec = (interval.count() % 1000) * 1000000;
+
         while (running) {
             UringOperation op;
             struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
