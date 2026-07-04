@@ -38,7 +38,7 @@ namespace servd {
             auto rng = std::make_unique<Botan::AutoSeeded_RNG>();
             Botan::X25519_PrivateKey privkey(
                 std::span<const uint8_t>(private_key.data(), private_key.size()));
-            Botan::PK_Key_Agreement ka(privkey, *rng, "X25519", "");
+            Botan::PK_Key_Agreement ka(privkey, *rng, "Raw", "");
             auto derived = ka.derive_key(32,
                 std::span<const uint8_t>(public_key.data(), public_key.size()), "");
             auto raw = derived.bits_of();
