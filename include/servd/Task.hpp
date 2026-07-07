@@ -311,7 +311,7 @@ Task<std::tuple<Ts...>> when_all(Task<Ts>... tasks) {
 template<typename T>
 Task<std::vector<T>> when_all(std::vector<Task<T>> tasks) {
     struct VectorState : detail::WhenAllStateBase {
-        std::vector<std::optional<T>> slots;
+        std::vector<detail::WhenAllSlot<T>> slots;
     };
 
     const auto n = static_cast<int>(tasks.size());
@@ -354,7 +354,7 @@ Task<std::vector<T>> when_all(std::vector<Task<T>> tasks) {
             std::vector<T> results;
             results.reserve(state->slots.size());
             for (auto& slot : state->slots)
-                results.push_back(std::move(*slot));
+                results.push_back(std::move(*slot.value));
             return results;
         }
     };
