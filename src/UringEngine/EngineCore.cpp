@@ -97,9 +97,11 @@ namespace servd
             auto *op = static_cast<UringOperation*>(io_uring_cqe_get_data(cqe));
             if (op != nullptr) {
                 op->cqe_res = cqe->res;
-                if (op->coroutine)
-                    op->coroutine.resume();
-                if (op->owned)
+                auto coro = op->coroutine;
+                bool owned = op->owned;
+                if (coro)
+                    coro.resume();
+                if (owned)
                     delete op;
             }
             io_uring_cqe_seen(&ring, cqe);
