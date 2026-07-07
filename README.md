@@ -1,6 +1,6 @@
 # servd — M2M Asynchronous Server Framework
 
-**servd** is a high-performance, single-threaded asynchronous server framework for **Machine-to-Machine** (M2M) communication, IoT, and distributed systems. Written in C++20, it leverages **Linux `io_uring`** and **C++20 Coroutines** to deliver minimal latency and maximal throughput — all without a single mutex in the hot path.
+**servd** is a high-performance asynchronous server framework for **Machine-to-Machine** (M2M) communication, IoT, and distributed systems. Written in C++20, it leverages **Linux `io_uring`** and **C++20 Coroutines** to deliver minimal latency and maximal throughput — all without a single mutex in the hot path.
 
 ---
 
@@ -18,6 +18,9 @@
 | **Push Events** | Server can push unsolicited frames to a client mid-request |
 | **Broadcast** | `broadcast()` / `broadcast_if(predicate)` to all connected clients |
 | **Periodic Timers** | Async timers via `IORING_OP_TIMEOUT` — no extra threads |
+| **Concurrent Task Combinator** | `when_all()` — launch N coroutines in parallel, await all results |
+| **Thread Pool** | Offload blocking calls (`popen`, `opendir`, ALSA) to worker threads |
+| **Fire-and-Forget** | `co_start()` / `Task::start()` — eager launch without awaiting |
 | **Network Discovery** | UDP broadcast-based zero-config (optional) |
 | **Config File** | `.env`-style configuration |
 
@@ -372,6 +375,9 @@ Server& enable_discovery(const DiscoveryConfig& config);
 Server& set_session_store(std::shared_ptr<ISessionStore> store);
 Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
 Server& load_config(const std::string& path);
+
+void enable_thread_pool(size_t thread_count = 4);  // enable blocking-offload pool
+ThreadPool& thread_pool();                           // access the pool at runtime
 ```
 
 ### Routing
@@ -437,6 +443,44 @@ void add_periodic_task(std::chrono::milliseconds interval,
 void init();   // Bind sockets, start accept loops, initialize defaults
 void run();    // Enter io_uring event loop (blocking)
 void stop();   // Signal the loop to exit
+```
+
+### Concurrency Utilities
+
+```cpp
+// Launch N tasks in parallel, await all results.
+// Heterogeneous version — each type is preserved:
+template<typename... Ts>
+Task<std::tuple<Ts...>> when_all(Task<Ts>... tasks);
+
+// Homogeneous version — all same type T:
+template<typename T>
+Task<std::vector<T>> when_all(std::vector<Task<T>> tasks);
+
+// Fire-and-forget — start a coroutine without awaiting it:
+template<typename T>
+void co_start(Task<T>& task);
+```
+
+### ThreadPool
+
+```cpp
+class ThreadPool {
+public:
+    explicit ThreadPool(size_t thread_count,
+                        PostCallback post_cb = nullptr);
+
+    template<typename F>
+    Task<std::invoke_result_t<F>> enqueue(F&& f);
+};
+
+// Usage inside a handler:
+auto result = co_await pool.enqueue([&]() {
+    return readGpuInfo();  // popen, opendir, ALSA — blocking code
+});
+// The server continues serving other clients while f() runs
+// on a worker thread. When done, the coroutine resumes on the
+// event-loop thread via an io_uring NOP completion.
 ```
 
 ---
@@ -522,7 +566,8 @@ servd/
 │   ├── Server.hpp              # Main server class
 │   ├── Protocol.hpp            # Frame header, enums, discovery packets
 │   ├── Context.hpp             # Per-request context with property bag
-│   ├── Task.hpp                # Coroutine task<T> / task<void>
+│   ├── Task.hpp                # Coroutine task<T> / task<void> / when_all / co_start
+│   ├── ThreadPool.hpp          # Blocking-offload thread pool
 │   ├── crypto/
 │   │   ├── AesGcm.hpp           # AES-256-GCM (via Botan)
 │   │   ├── X25519.hpp           # X25519 key agreement (via Botan)

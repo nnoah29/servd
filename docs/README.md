@@ -9,7 +9,8 @@ servd est un framework C++20 pour construire des serveurs M2M (Machine-to-Machin
 - **Chiffrement de bout en bout** — X25519 + AES-256-GCM via Botan 3
 - **Broadcast / Push** — le serveur peut envoyer des messages non sollicités
 - **Tâches périodiques** — timers intégrés à la boucle d'événements
-- **Mono-thread** — pas de mutex, pas de data race, pas de deadlock
+- **Mono-thread (event loop)** + **ThreadPool optionnel** pour les appels bloquants
+- **Parallélisme de coroutines** — `when_all()` lance N tâches concurrentes
 - **Authentification injectable** — interface `IAuthenticator`
 - **Stockage de sessions injectable** — interface `ISessionStore`
 - **Routage O(1)** — tableau indexé par ID de commande

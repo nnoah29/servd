@@ -320,9 +320,19 @@ Dependencies:
 
 No Boost, no OpenSSL, no protobuf.
 
+### Concurrency — `when_all` and `co_start`
+
+Two higher-level concurrency helpers are built on top of `Task<T>`:
+
+- **`when_all(tasks...)`** — launches N coroutines concurrently (bypassing `Task`'s lazy `initial_suspend`). Each task is wrapped in a small internal `WhenAllTask<T>` coroutine that `co_await`s the original task, stores the result in a shared state, and atomically decrements a counter in its `final_suspend`. When the counter reaches zero, the last wrapper resumes the `when_all` caller. Exceptions from any task are captured and rethrown.
+
+- **`co_start(task)`** — eagerly resumes a `Task<T>` without setting a continuation, useful for fire-and-forget scenarios. The `Task` object must outlive the started coroutine.
+
 ---
 
 ## 13. Threading Model
+
+### 13.1 Event Loop Thread
 
 ```
 Single thread runs:
@@ -336,4 +346,45 @@ Single thread runs:
 
 All coroutines are interleaved on the same thread. The `run()` loop acts as a cooperative scheduler — each coroutine yields at `co_await` points and resumes when its I/O completes.
 
-**There is no preemption, no thread pool, no work stealing.** This keeps the design simple and eliminates all concurrency bugs.
+**There is no preemption and no mutex in the hot path.** This keeps the design simple and eliminates concurrency bugs.
+
+### 13.2 Optional Thread Pool for Blocking Operations
+
+When `Server::enable_thread_pool(N)` is called, servd creates a `ThreadPool` with N dedicated worker threads. This pool exists solely to offload **blocking system calls** (`popen`, `opendir`, `getpwuid`, ALSA `snd_mixer_*`, etc.) that would otherwise stall the entire event loop.
+
+```
+Worker thread 1 ──┐
+Worker thread 2 ──┤  execute f(), store result,
+Worker thread 3 ──┤  submit io_uring NOP to wake
+Worker thread 4 ──┘  the waiting coroutine
+```
+
+**Thread handoff protocol:**
+
+```
+Event loop thread                    Worker thread
+        │                                 │
+        ├─ co_await pool.enqueue(f)        │
+        │  ├─ submit f() to queue          │
+        │  └─ suspend (waits)              │
+        │                                 ├─ pick up f()
+        │                                 ├─ execute f()
+        │                                 ├─ store result in shared state
+        │                                 └─ post io_uring NOP
+        │                                      │
+        ├─ CQE: NOP completes                  │
+        ├─ resume waiting coroutine            │
+        └─ continue processing result          │
+```
+
+The worker thread does **not** directly call `coroutine_handle::resume()` — it submits an `io_uring NOP` operation to the kernel ring. The event loop picks up the resulting CQE on its own thread and resumes the coroutine. This guarantees that **all coroutine execution stays on the event-loop thread**, preserving the single-threaded programming model.
+
+### 13.3 Thread Safety Summary
+
+| Resource | Shared between | Protection |
+|----------|---------------|------------|
+| `io_uring` SQ (from event loop) | Event loop only | None needed |
+| `io_uring` SQ (from workers) | Workers + event loop | `sqe_mutex_` in `UringEngine` |
+| Worker task queue | All workers | `std::mutex` + `std::condition_variable` |
+| Coroutine shared state (per `enqueue`) | 1 worker + event loop | Per-operation `std::mutex` |
+| Session store / authenticator | Event loop only | None needed |

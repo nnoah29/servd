@@ -22,6 +22,7 @@
 
 #include "servd/Protocol.hpp"
 #include "servd/Task.hpp"
+#include "servd/ThreadPool.hpp"
 #include "servd/router/Router.hpp"
 #include "servd/interfaces/ISessionStore.hpp"
 #include "servd/interfaces/IAuthenticator.hpp"
@@ -75,6 +76,9 @@ namespace servd {
             Task<void> broadcast_if(uint16_t command_id, bytes payload,
                 std::function<bool(const Session&)> predicate) const;
 
+            ThreadPool& thread_pool();
+            void enable_thread_pool(size_t thread_count = 4);
+
             void init();
             void run() const;
             void stop() const;
@@ -94,6 +98,8 @@ namespace servd {
 
             sd_bus* session_bus_ = nullptr;
             sd_bus* system_bus_ = nullptr;
+
+            std::unique_ptr<ThreadPool> thread_pool_;
 
             struct UringEngine;
             std::unique_ptr<UringEngine> engine_;

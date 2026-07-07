@@ -111,4 +111,19 @@ namespace servd
         engine_->running = false;
     }
 
+    ThreadPool& Server::thread_pool()
+    {
+        if (!thread_pool_)
+            throw std::runtime_error("ThreadPool not enabled. Call enable_thread_pool() before init().");
+        return *thread_pool_;
+    }
+
+    void Server::enable_thread_pool(size_t thread_count)
+    {
+        thread_pool_ = std::make_unique<ThreadPool>(thread_count,
+            [this](std::coroutine_handle<> h) {
+                engine_->post_coroutine(h);
+            });
+    }
+
 }

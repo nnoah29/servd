@@ -50,8 +50,8 @@ This document lists known limitations, planned features, and ideas for future de
 
 1. **No TLS** — all traffic is plaintext. Do not use over untrusted networks.
 2. **No tests** — the project currently has zero automated tests.
-3. **Single-threaded** — one thread handles all I/O. CPU-bound handlers will block the entire server.
-4. **All handlers must be coroutines** — `Handler` returns `Task<ResponseFrame>`. Blocking inside a handler blocks the event loop.
+3. **Single-threaded event loop** — the I/O thread is single-threaded, but CPU-bound operations can be offloaded via `Server::enable_thread_pool()` and `pool.enqueue()`. Blocking calls inside a handler still block the event loop unless offloaded.
+4. **All handlers must be coroutines** — `Handler` returns `Task<ResponseFrame>`. Inside a handler, use `co_await pool.enqueue(f)` to run blocking code without stalling the event loop.
 5. **No request timeout** — a handler that never `co_return`s hangs the client forever.
 6. **Router is brute-force** — `std::array<Endpoint, 65536>` is simple but wastes ~4 MB for unused slots.
 7. **`InMemorySessionStore` is not persisted** — all sessions are lost on restart. Bring your own `ISessionStore` for persistence.

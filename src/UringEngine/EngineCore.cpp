@@ -43,6 +43,35 @@ namespace servd
         sessions_.erase(session_id);
     }
 
+    void Server::UringEngine::post_coroutine(std::coroutine_handle<> h) {
+        auto* op = new UringOperation{};
+        op->coroutine = h;
+        op->owned = true;
+
+        std::lock_guard lock(sqe_mutex_);
+        struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+        if (!sqe) {
+            pending_posts_.push(op);
+            return;
+        }
+        io_uring_prep_nop(sqe);
+        io_uring_sqe_set_data(sqe, op);
+        io_uring_submit(&ring);
+    }
+
+    void Server::UringEngine::drain_pending_posts() {
+        std::lock_guard lock(sqe_mutex_);
+        while (!pending_posts_.empty()) {
+            auto* op = pending_posts_.front();
+            struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+            if (!sqe) break;
+            pending_posts_.pop();
+            io_uring_prep_nop(sqe);
+            io_uring_sqe_set_data(sqe, op);
+            io_uring_submit(&ring);
+        }
+    }
+
     void Server::UringEngine::run() {
         struct sigaction sa_sigpipe{};
         sigemptyset(&sa_sigpipe.sa_mask);
@@ -61,6 +90,8 @@ namespace servd
 
         struct io_uring_cqe *cqe;
         while (running && !g_signal_received) {
+            drain_pending_posts();
+
             const int res = io_uring_wait_cqe(&ring, &cqe);
             if (res < 0) continue;
             auto *op = static_cast<UringOperation*>(io_uring_cqe_get_data(cqe));
@@ -68,6 +99,8 @@ namespace servd
                 op->cqe_res = cqe->res;
                 if (op->coroutine)
                     op->coroutine.resume();
+                if (op->owned)
+                    delete op;
             }
             io_uring_cqe_seen(&ring, cqe);
         }

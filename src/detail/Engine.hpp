@@ -23,6 +23,8 @@
 #include <coroutine>
 #include <system_error>
 #include <stdexcept>
+#include <mutex>
+#include <queue>
 
 #include <sys/socket.h>
 #include <poll.h>
@@ -46,6 +48,7 @@ namespace servd
     {
         std::coroutine_handle<> coroutine;
         int cqe_res{};
+        bool owned = false;
 
         static bool await_ready() noexcept { return false; }
         void await_suspend(std::coroutine_handle<> continuation) noexcept { coroutine = continuation; }
@@ -66,6 +69,8 @@ namespace servd
         ~UringEngine();
 
         void run();
+        void post_coroutine(std::coroutine_handle<> h);
+        void drain_pending_posts();
 
         Task<int> async_accept(int server_fd);
         Task<int> async_read(int fd, std::span<std::byte> buffer);
@@ -116,6 +121,9 @@ namespace servd
         Task<void> do_broadcast(uint16_t command_id, bytes payload);
         Task<void> do_broadcast_if(uint16_t command_id, bytes payload,
             std::function<bool(const Session&)> predicate);
+
+        std::mutex sqe_mutex_;
+        std::queue<UringOperation*> pending_posts_;
 
         std::unordered_map<uint64_t, int> sessions_;
         size_t active_connections_ = 0;
