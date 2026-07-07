@@ -16,6 +16,16 @@
 namespace servd
 {
 
+    Task<int> Server::UringEngine::async_poll_add(int fd, short events)
+    {
+        UringOperation op;
+        struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+        io_uring_prep_poll_add(sqe, fd, events);
+        io_uring_sqe_set_data(sqe, &op);
+        io_uring_submit(&ring);
+        co_return co_await op;
+    }
+
     Task<int> Server::UringEngine::async_accept(int server_fd)
     {
         UringOperation op;

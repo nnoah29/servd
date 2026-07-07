@@ -25,11 +25,14 @@
 #include <stdexcept>
 
 #include <sys/socket.h>
+#include <poll.h>
 #include <servd/Server.hpp>
 #include <servd/interfaces/IConnection.hpp>
 #include <servd/crypto/AesGcm.hpp>
 #include <servd/crypto/X25519.hpp>
 #include <cerrno>
+
+struct sd_bus;
 
 namespace servd
 {
@@ -68,6 +71,7 @@ namespace servd
         Task<int> async_read(int fd, std::span<std::byte> buffer);
         Task<int> async_write(int fd, std::span<const std::byte> buffer);
         Task<void> async_read_exact(int fd, std::span<std::byte> buffer);
+        Task<int> async_poll_add(int fd, short events);
         class UringTcpConnection final : public IConnection {
             public:
                 UringTcpConnection(int fd, UringEngine& engine);
@@ -104,6 +108,7 @@ namespace servd
         DetachedTask start_accept_loop(int server_fd, ProtocolMode mode = ProtocolMode::BINARY);
         DetachedTask start_udp_loop(int udp_fd);
         DetachedTask periodic_timer_loop(std::chrono::milliseconds interval, PeriodicTaskHandler handler);
+        DetachedTask bus_monitor_loop(sd_bus* bus);
 
         void register_session(uint64_t session_id, int fd);
         void unregister_session(uint64_t session_id);

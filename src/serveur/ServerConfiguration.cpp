@@ -1,4 +1,5 @@
 #include "detail/Engine.hpp"
+#include <systemd/sd-bus.h>
 
 namespace servd
 {
@@ -23,6 +24,16 @@ namespace servd
 
     Server& Server::enable_discovery(const DiscoveryConfig& config) {
         discovery_config_ = config;
+        return *this;
+    }
+
+    Server& Server::enable_session_bus() {
+        sd_bus_default_user(&session_bus_);
+        return *this;
+    }
+
+    Server& Server::enable_system_bus() {
+        sd_bus_default_system(&system_bus_);
         return *this;
     }
 

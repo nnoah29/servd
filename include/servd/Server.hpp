@@ -26,6 +26,7 @@
 #include "servd/interfaces/ISessionStore.hpp"
 #include "servd/interfaces/IAuthenticator.hpp"
 
+struct sd_bus;
 
 namespace servd {
 
@@ -59,6 +60,9 @@ namespace servd {
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
 
+            Server& enable_session_bus();
+            Server& enable_system_bus();
+
             Server& set_max_clients(size_t max);
             Server& load_config(const std::string& path);
             Server& add_command_name(const std::string& name, uint16_t command_id);
@@ -78,7 +82,7 @@ namespace servd {
         private:
             Router router_;
             std::shared_ptr<ISessionStore> session_store_;
-            std::shared_ptr<IAuthenticator> authenticator_; // <-- NOUVEAU
+            std::shared_ptr<IAuthenticator> authenticator_;
 
             std::vector<std::pair<uint16_t, ProtocolMode>> tcp_ports_;
             std::vector<uint16_t> udp_ports_;
@@ -87,6 +91,9 @@ namespace servd {
             std::vector<PeriodicTaskInfo> periodic_tasks_;
             size_t max_clients_ = 0;
             std::unordered_map<std::string, uint16_t> text_command_names_;
+
+            sd_bus* session_bus_ = nullptr;
+            sd_bus* system_bus_ = nullptr;
 
             struct UringEngine;
             std::unique_ptr<UringEngine> engine_;

@@ -10,6 +10,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(cmake/CPM.cmake)
 
 find_package(Botan REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 
 # ============================================================
 # Library
@@ -42,7 +44,8 @@ target_include_directories(servd_core
         ${CMAKE_CURRENT_SOURCE_DIR}/Logger
 )
 
-target_link_libraries(servd_core PUBLIC Botan::Botan uring)
+target_link_libraries(servd_core PUBLIC Botan::Botan uring ${SYSTEMD_LIBRARIES})
+target_include_directories(servd_core PUBLIC ${SYSTEMD_INCLUDE_DIRS})
 
 # ============================================================
 # Example executable

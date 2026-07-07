@@ -17,6 +17,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <linux/time_types.h>
+#include <systemd/sd-bus.h>
 
 namespace servd
 {
@@ -148,6 +149,16 @@ namespace servd
             } catch (const std::exception& e) {
                 LOG(Logger::LogLevel::ERROR, "[Erreur UDP] %s", e.what());
             }
+        }
+    }
+
+    DetachedTask Server::UringEngine::bus_monitor_loop(sd_bus* bus)
+    {
+        const int fd = sd_bus_get_fd(bus);
+        while (running) {
+            const int mask = co_await async_poll_add(fd, POLLIN);
+            if (mask < 0) continue;
+            while (sd_bus_process(bus, nullptr) > 0) {}
         }
     }
 

@@ -71,6 +71,16 @@ namespace servd
             engine_->periodic_timer_loop(task.interval, task.handler);
         }
 
+        if (session_bus_) {
+            LOG(Logger::LogLevel::INFO, "[Serveur] Bus session D-Bus actif");
+            engine_->bus_monitor_loop(session_bus_);
+        }
+
+        if (system_bus_) {
+            LOG(Logger::LogLevel::INFO, "[Serveur] Bus systeme D-Bus actif");
+            engine_->bus_monitor_loop(system_bus_);
+        }
+
         for (const uint16_t port : udp_ports_) {
             const int fd = socket(AF_INET, SOCK_DGRAM, 0);
             if (fd < 0) throw std::runtime_error("Erreur creation socket UDP");
