@@ -1,7 +1,7 @@
 #include "detail/Engine.hpp"
 #include <servd/store/InMemorySessionStore.hpp>
 #include <servd/auth/DefaultAuthenticator.hpp>
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/un.h>
@@ -14,12 +14,12 @@ namespace servd
     void Server::init()
     {
         if (!session_store_) {
-            LOG(Logger::LogLevel::INFO, "[Serveur] Aucun SessionStore defini, utilisation de InMemorySessionStore par defaut.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Aucun SessionStore defini, utilisation de InMemorySessionStore par defaut.");
             session_store_ = std::make_shared<InMemorySessionStore>();
         }
 
         if (!authenticator_) {
-            LOG(Logger::LogLevel::INFO, "[Serveur] Aucun Authenticator defini, utilisation de DefaultAuthenticator par defaut.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Aucun Authenticator defini, utilisation de DefaultAuthenticator par defaut.");
             authenticator_ = std::make_shared<DefaultAuthenticator>();
         }
 
@@ -43,7 +43,7 @@ namespace servd
             if (listen(fd, SOMAXCONN) < 0)
                 throw std::runtime_error("Erreur listen() TCP");
 
-            LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute TCP sur le port %u", port);
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute TCP sur le port %u", port);
             engine_->start_accept_loop(fd, mode);
         }
 
@@ -63,7 +63,7 @@ namespace servd
             if (listen(fd, SOMAXCONN) < 0)
                 throw std::runtime_error("Erreur listen() UNIX");
 
-            LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UNIX sur %s", path.c_str());
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UNIX sur %s", path.c_str());
             engine_->start_accept_loop(fd, mode);
         }
 
@@ -72,12 +72,12 @@ namespace servd
         }
 
         if (session_bus_) {
-            LOG(Logger::LogLevel::INFO, "[Serveur] Bus session D-Bus actif");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Bus session D-Bus actif");
             engine_->bus_monitor_loop(session_bus_);
         }
 
         if (system_bus_) {
-            LOG(Logger::LogLevel::INFO, "[Serveur] Bus systeme D-Bus actif");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Bus systeme D-Bus actif");
             engine_->bus_monitor_loop(system_bus_);
         }
 
@@ -96,7 +96,7 @@ namespace servd
             if (bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
                 throw std::runtime_error("Erreur bind() UDP sur le port " + std::to_string(port));
 
-            LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UDP sur le port %u", port);
+            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UDP sur le port %u", port);
             engine_->start_udp_loop(fd);
         }
     }

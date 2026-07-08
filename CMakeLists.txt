@@ -32,7 +32,7 @@ add_library(servd_core
     src/UringEngine/EncryptedHandler.cpp
     src/UringEngine/ConnectionImpl.cpp
     src/UringEngine/UdpConnection.cpp
-    Logger/Logger.cpp
+    src/Logger.cpp
 )
 
 target_include_directories(servd_core
@@ -41,7 +41,6 @@ target_include_directories(servd_core
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/Logger
 )
 
 target_link_libraries(servd_core PUBLIC Botan::Botan uring ${SYSTEMD_LIBRARIES})

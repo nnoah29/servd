@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <cstring>
 #include <vector>
 #include <optional>
@@ -53,7 +53,7 @@ namespace
         std::vector<std::byte> inner_payload(pt.size() - sizeof(uint16_t));
         if (!inner_payload.empty())
             std::memcpy(inner_payload.data(), pt.data() + sizeof(uint16_t), inner_payload.size());
-        LOG(Logger::LogLevel::DEBUG, "[Crypte] Cmd %u decryptee (%zu octets)", inner_cmd, inner_payload.size());
+        SERVD_LOG(Logger::LogLevel::DEBUG, "[Crypte] Cmd %u decryptee (%zu octets)", inner_cmd, inner_payload.size());
         return DecryptedMessage{std::move(cipher), inner_cmd, std::move(inner_payload)};
     }
 
@@ -63,7 +63,7 @@ namespace
         const auto ep = router.get(inner_cmd);
 
         if (!ep) {
-            LOG(Logger::LogLevel::WARN, "[Crypte] Cmd inconnue: %u", inner_cmd);
+            SERVD_LOG(Logger::LogLevel::WARN, "[Crypte] Cmd inconnue: %u", inner_cmd);
             co_return;
         }
 
@@ -74,7 +74,7 @@ namespace
             && (ep->allowed_transport == TransportType::ANY || ep->allowed_transport == conn.transport_type());
 
         if (!ok) {
-            LOG(Logger::LogLevel::WARN, "[Crypte] Rejet cmd %u", inner_cmd); co_return;
+            SERVD_LOG(Logger::LogLevel::WARN, "[Crypte] Rejet cmd %u", inner_cmd); co_return;
         }
         auto [flags, resp] = co_await ep->handler(ctx);
         std::vector<std::byte> inner(sizeof(uint16_t) + resp.size());

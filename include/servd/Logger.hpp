@@ -1,22 +1,11 @@
-/*
-**  _                                              _      ___    ___  
-** | |                                            | |    |__ \  / _ \
-** | |_Created _       _ __   _ __    ___    __ _ | |__     ) || (_) |
-** | '_ \ | | | |     | '_ \ | '_ \  / _ \  / _` || '_ \   / /  \__, |
-** | |_) || |_| |     | | | || | | || (_) || (_| || | | | / /_    / /
-** |_.__/  \__, |     |_| |_||_| |_| \___/  \__,_||_| |_||____|  /_/
-**          __/ |     on 25/06/2026.
-**         |___/
-*/
-
-
-
 #pragma once
 
 #include <mutex>
 #include <string_view>
 #include <fstream>
 #include <string>
+
+namespace servd {
 
 class Logger {
 public:
@@ -26,7 +15,6 @@ public:
         WARN,
         ERROR
     };
-
 
     Logger() = delete;
     Logger(const Logger&) = delete;
@@ -47,12 +35,10 @@ private:
     static void print_sanitized(const char* str);
 };
 
+}
 
-const char *to_str(const std::string& msg);
+#define SERVD_LOGS(level, format, ...) \
+    servd::Logger::log_s(level, __FILE__, __LINE__, format, ##__VA_ARGS__)
 
-#define LOGS(level, format, ...) \
-    Logger::log_s(level, __FILE__, __LINE__, format, ##__VA_ARGS__)
-
-#define LOG(level, format, ...) \
-    Logger::log(level, __FILE__, __LINE__, format, ##__VA_ARGS__)
-
+#define SERVD_LOG(level, format, ...) \
+    servd::Logger::log(level, __FILE__, __LINE__, format, ##__VA_ARGS__)

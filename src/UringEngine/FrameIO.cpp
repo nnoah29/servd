@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <cstring>
 #include <charconv>
 #include <sstream>
@@ -74,7 +74,7 @@ namespace servd {
 
         if (!parse_text_header(header_line, frame.header.command_id,
             frame.header.session_id, server_.text_command_names_)) {
-            LOG(Logger::LogLevel::WARN, "[Texte] Header invalide: %s", header_line.c_str());
+            SERVD_LOG(Logger::LogLevel::WARN, "[Texte] Header invalide: %s", header_line.c_str());
             co_return frame;
         }
 

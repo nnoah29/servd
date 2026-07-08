@@ -26,6 +26,7 @@
 #include "servd/router/Router.hpp"
 #include "servd/interfaces/ISessionStore.hpp"
 #include "servd/interfaces/IAuthenticator.hpp"
+#include "servd/Logger.hpp"
 
 struct sd_bus;
 

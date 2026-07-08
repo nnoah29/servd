@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <stdexcept>
 #include <csignal>
 
@@ -110,7 +110,7 @@ namespace servd
         running = false;
 
         if (g_signal_received)
-            LOG(Logger::LogLevel::INFO, "[UringEngine] Signal recu, arret du serveur.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[UringEngine] Signal recu, arret du serveur.");
     }
 
 }

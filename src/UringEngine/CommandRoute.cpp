@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <cstring>
 #include <servd/Protocol.hpp>
 #include <servd/Context.hpp>
@@ -24,7 +24,7 @@ namespace servd
         const ClientFrame& frame, IConnection& connection, Session& session)
     {
         if (frame.payload.size() != 32) {
-            LOG(Logger::LogLevel::WARN, "[KeyExchange] Taille cle invalide: %zu", frame.payload.size());
+            SERVD_LOG(Logger::LogLevel::WARN, "[KeyExchange] Taille cle invalide: %zu", frame.payload.size());
             co_return;
         }
 
@@ -37,7 +37,7 @@ namespace servd
 
         session.set_aes_key(shared);
 
-        LOG(Logger::LogLevel::INFO, "[KeyExchange] Session %lu: secret X25519 etabli.", session.id());
+        SERVD_LOG(Logger::LogLevel::INFO, "[KeyExchange] Session %lu: secret X25519 etabli.", session.id());
 
         co_await connection.send_frame({CMD_KEY_EXCHANGE, 0, 32, session.id()},
             {reinterpret_cast<const std::byte*>(server_pub.data()), 32});
@@ -48,7 +48,7 @@ namespace servd
     {
         const auto endpoint = server_.router_.get(frame.header.command_id);
         if (!endpoint) {
-            LOG(Logger::LogLevel::WARN, "[Rejet] Commande inconnue: %u", frame.header.command_id);
+            SERVD_LOG(Logger::LogLevel::WARN, "[Rejet] Commande inconnue: %u", frame.header.command_id);
             co_return;
         }
         Context ctx(frame.header, frame.payload, session, connection);
@@ -57,7 +57,7 @@ namespace servd
                && (endpoint->allowed_transport == TransportType::ANY
                 || endpoint->allowed_transport == connection.transport_type());
         if (!ok) {
-            LOG(Logger::LogLevel::WARN, "[Rejet] Securite/Transport invalide pour CMD %u", frame.header.command_id);
+            SERVD_LOG(Logger::LogLevel::WARN, "[Rejet] Securite/Transport invalide pour CMD %u", frame.header.command_id);
             co_return;
         }
 

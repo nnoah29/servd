@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <cstring>
 #include <vector>
 #include <array>
@@ -46,7 +46,7 @@ namespace servd
                 co_await server_.session_store_->save(session);
 
             } catch (const std::exception& e) {
-                LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                SERVD_LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
                 break;
             }
         }
@@ -82,7 +82,7 @@ namespace servd
                 co_await process_command(frame, connection, session);
                 co_await server_.session_store_->save(session);
             } catch (const std::exception& e) {
-                LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                SERVD_LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
                 break;
             }
         }
@@ -100,12 +100,12 @@ namespace servd
 
                 const int client_fd = co_await async_accept(server_fd);
                 if (server_.max_clients_ > 0 && active_connections_ >= server_.max_clients_) {
-                    LOG(Logger::LogLevel::WARN, "[Rejet] Limite de clients atteinte (%zu)", server_.max_clients_);
+                    SERVD_LOG(Logger::LogLevel::WARN, "[Rejet] Limite de clients atteinte (%zu)", server_.max_clients_);
                     close(client_fd);
                     continue;
                 }
 
-                LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
+                SERVD_LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
 
                 if (mode == ProtocolMode::TEXT)
                     text_handle_client(client_fd);
@@ -113,7 +113,7 @@ namespace servd
                     handle_client(client_fd);
 
             } catch (std::exception& e) {
-                LOG(Logger::LogLevel::ERROR, "[Erreur] %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Erreur] %s", e.what());
             }
         }
     }
@@ -147,7 +147,7 @@ namespace servd
                 co_await server_.session_store_->save(session);
 
             } catch (const std::exception& e) {
-                LOG(Logger::LogLevel::ERROR, "[Erreur UDP] %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Erreur UDP] %s", e.what());
             }
         }
     }
@@ -179,7 +179,7 @@ namespace servd
             try {
                 co_await handler(server_);
             } catch (const std::exception& e) {
-                LOG(Logger::LogLevel::ERROR, "[Timer] Erreur: %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Timer] Erreur: %s", e.what());
             }
         }
     }

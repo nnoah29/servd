@@ -1,16 +1,4 @@
-/*
-**  _                                              _      ___    ___  
-** | |                                            | |    |__ \  / _ \
-** | |_Created _       _ __   _ __    ___    __ _ | |__     ) || (_) |
-** | '_ \ | | | |     | '_ \ | '_ \  / _ \  / _` || '_ \   / /  \__, |
-** | |_) || |_| |     | | | || | | || (_) || (_| || | | | / /_    / /
-** |_.__/  \__, |     |_| |_||_| |_| \___/  \__,_||_| |_||____|  /_/
-**          __/ |     on 25/06/2026.
-**         |___/
-*/
-
-
-#include "Logger.hpp"
+#include <servd/Logger.hpp>
 #include <iostream>
 #include <vector>
 #include <chrono>
@@ -30,15 +18,19 @@
     #include <unistd.h>
 #endif
 
+namespace servd {
+
 Logger::LogLevel Logger::s_level = Logger::LogLevel::DEBUG;
 std::string Logger::s_log_file = "";
 std::ofstream Logger::s_file_stream;
 std::mutex Logger::s_log_mutex;
 
+namespace {
 const std::vector<std::string_view> G_LEVEL_STRINGS = {"DEBUG", "INFO ", "WARN ", "ERROR"};
 const std::vector<std::string_view> G_LEVEL_COLORS = {"\x1b[94m", "\x1b[32m", "\x1b[33m", "\x1b[31m"};
 constexpr std::string_view COLOR_RESET = "\x1b[0m";
 constexpr std::string_view COLOR_META = "\x1b[90m";
+}
 
 #ifdef _WIN32
 void enable_virtual_terminal_processing() {
@@ -49,16 +41,11 @@ void enable_virtual_terminal_processing() {
     DWORD dwMode = 0;
     if (!GetConsoleMode(hOut, &dwMode)) return;
     dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    if (SetConsoleMode(hOut, dwMode)) {
+    if (SetConsoleMode(hOut, &dwMode)) {
         enabled = true;
     }
 }
 #endif
-
-const char *to_str(const std::string& msg)
-{
-    return msg.c_str();
-}
 
 void Logger::setLevel(LogLevel level)
 {
@@ -160,6 +147,7 @@ void Logger::log(LogLevel level, const char* file, int line, const char* format,
         s_file_stream << std::endl;
     }
 }
+
 void Logger::log_s(LogLevel level, const char* file, int line, const char* format, ...)
 {
     if (level < s_level) {
@@ -205,4 +193,6 @@ void Logger::log_s(LogLevel level, const char* file, int line, const char* forma
         }
         s_file_stream << std::endl;
     }
+}
+
 }

@@ -10,7 +10,7 @@
 */
 
 #include "../detail/Engine.hpp"
-#include <Logger.hpp>
+#include <servd/Logger.hpp>
 #include <cstring>
 #include <vector>
 
@@ -32,7 +32,7 @@ namespace servd
         if (!payload.empty()) {
             std::memcpy(buffer.data() + sizeof(FrameHeader), payload.data(), payload.size());
         }
-        LOG(Logger::LogLevel::DEBUG, "[Session] Sending to session %lu", session_id);
+        SERVD_LOG(Logger::LogLevel::DEBUG, "[Session] Sending to session %lu", session_id);
         co_await async_write(it->second, buffer);
     }
 
@@ -48,7 +48,7 @@ namespace servd
                 std::memcpy(buffer.data() + sizeof(FrameHeader), payload.data(), payload.size());
             }
 
-            LOG(Logger::LogLevel::DEBUG, "[Session] Broadcasting to session %lu", sid);
+            SERVD_LOG(Logger::LogLevel::DEBUG, "[Session] Broadcasting to session %lu", sid);
 
             co_await async_write(fd, buffer);
         }
