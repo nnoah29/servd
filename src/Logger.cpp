@@ -24,6 +24,7 @@ Logger::LogLevel Logger::s_level = Logger::LogLevel::DEBUG;
 std::string Logger::s_log_file = "";
 std::ofstream Logger::s_file_stream;
 std::mutex Logger::s_log_mutex;
+size_t Logger::s_file_column_width = 32;
 
 namespace {
 const std::vector<std::string_view> G_LEVEL_STRINGS = {"DEBUG", "INFO ", "WARN ", "ERROR"};
@@ -77,6 +78,22 @@ void Logger::setLogFile(const std::string& file_path)
     }
 }
 
+void Logger::setFileColumnWidth(size_t width)
+{
+    s_file_column_width = width;
+}
+
+std::string Logger::format_file_column(const char* basename, int line)
+{
+    std::string loc = std::string("(") + basename + ":" + std::to_string(line) + ")";
+    if (loc.size() > s_file_column_width) {
+        loc = ".." + loc.substr(loc.size() - (s_file_column_width - 2));
+    } else {
+        loc.append(s_file_column_width - loc.size(), ' ');
+    }
+    return loc;
+}
+
 std::string Logger::get_formatted_time()
 {
     const auto now = std::chrono::system_clock::now();
@@ -122,10 +139,10 @@ void Logger::log(LogLevel level, const char* file, int line, const char* format,
     if (isatty(fileno(stderr))) {
         std::cerr << COLOR_META << time_str << " " << COLOR_RESET
                   << G_LEVEL_COLORS[level_idx] << "[" << G_LEVEL_STRINGS[level_idx] << "]" << COLOR_RESET
-                  << COLOR_META << " (" << basename << ":" << line << "): " << COLOR_RESET;
+                  << COLOR_META << " " << format_file_column(basename, line) << ": " << COLOR_RESET;
     } else {
         std::cerr << time_str << " [" << G_LEVEL_STRINGS[level_idx] << "] "
-                  << "(" << basename << ":" << line << "): ";
+                  << " " << format_file_column(basename, line) << ": ";
     }
 
     char message_buffer[2048];
@@ -139,7 +156,7 @@ void Logger::log(LogLevel level, const char* file, int line, const char* format,
 
     if (s_file_stream.is_open()) {
         s_file_stream << time_str << " [" << G_LEVEL_STRINGS[level_idx] << "] "
-                      << "(" << basename << ":" << line << "): ";
+                      << " " << format_file_column(basename, line) << ": ";
         for (int i = 0; message_buffer[i] != '\0'; ++i) {
             if (message_buffer[i] == '\n') s_file_stream << "\\n";
             else s_file_stream << message_buffer[i];
@@ -169,10 +186,10 @@ void Logger::log_s(LogLevel level, const char* file, int line, const char* forma
     if (isatty(fileno(stderr))) {
         std::cerr << COLOR_META << time_str << " " << COLOR_RESET
                   << G_LEVEL_COLORS[level_idx] << "[" << G_LEVEL_STRINGS[level_idx] << "]" << COLOR_RESET
-                  << COLOR_META << " (" << basename << ":" << line << "): " << COLOR_RESET;
+                  << COLOR_META << " " << format_file_column(basename, line) << ": " << COLOR_RESET;
     } else {
         std::cerr << time_str << " [" << G_LEVEL_STRINGS[level_idx] << "] "
-                  << "(" << basename << ":" << line << "): ";
+                  << " " << format_file_column(basename, line) << ": ";
     }
 
     char message_buffer[2048];
@@ -186,7 +203,7 @@ void Logger::log_s(LogLevel level, const char* file, int line, const char* forma
 
     if (s_file_stream.is_open()) {
         s_file_stream << time_str << " [" << G_LEVEL_STRINGS[level_idx] << "] "
-                      << "(" << basename << ":" << line << "): ";
+                      << " " << format_file_column(basename, line) << ": ";
         for (int i = 0; message_buffer[i] != '\0'; ++i) {
             if (message_buffer[i] == '\n') s_file_stream << "\\n";
             else s_file_stream << message_buffer[i];

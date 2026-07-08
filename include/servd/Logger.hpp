@@ -22,6 +22,7 @@ public:
 
     static void setLevel(LogLevel level);
     static void setLogFile(const std::string& file_path);
+    static void setFileColumnWidth(size_t width);
     static void log_s(LogLevel level, const char* file, int line, const char* format, ...);
     static void log(LogLevel level, const char* file, int line, const char* format, ...);
 
@@ -30,8 +31,10 @@ private:
     static std::string s_log_file;
     static std::ofstream s_file_stream;
     static std::mutex s_log_mutex;
+    static size_t s_file_column_width;
 
     static std::string get_formatted_time();
+    static std::string format_file_column(const char* basename, int line);
     static void print_sanitized(const char* str);
 };
 
