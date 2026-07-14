@@ -22,7 +22,7 @@ namespace servd
 
     Server& Server::load_config(const std::string& path) {
         std::ifstream file(path);
-        if (!file) throw std::runtime_error("Impossible d'ouvrir le fichier de config: " + path);
+        if (!file) throw std::runtime_error("Unable to open config file: " + path);
 
         std::string line;
         while (std::getline(file, line)) {
@@ -42,6 +42,7 @@ namespace servd
             else if (key == "log_level") Logger::setLevel(parse_log_level(value));
             else if (key == "log_file")  Logger::setLogFile(value);
         }
+        SERVD_LOG(Logger::LogLevel::INFO, "[Config] Loaded config from %s", path.c_str());
         return *this;
     }
 

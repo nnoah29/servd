@@ -14,12 +14,12 @@ namespace servd
     void Server::init()
     {
         if (!session_store_) {
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Aucun SessionStore defini, utilisation de InMemorySessionStore par defaut.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] No SessionStore defined, using InMemorySessionStore by default.");
             session_store_ = std::make_shared<InMemorySessionStore>();
         }
 
         if (!authenticator_) {
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Aucun Authenticator defini, utilisation de DefaultAuthenticator par defaut.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] No Authenticator defined, using DefaultAuthenticator by default.");
             authenticator_ = std::make_shared<DefaultAuthenticator>();
         }
 
@@ -27,7 +27,7 @@ namespace servd
 
         for (const auto& [port, mode] : tcp_ports_) {
             const int fd = socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) throw std::runtime_error("Erreur creation socket TCP");
+            if (fd < 0) throw std::runtime_error("Failed to create TCP socket");
 
             int opt = 1;
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
@@ -38,18 +38,18 @@ namespace servd
             addr.sin_port = htons(port);
 
             if (bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-                throw std::runtime_error("Erreur bind() sur le port TCP " + std::to_string(port));
+                throw std::runtime_error("bind() failed on TCP port " + std::to_string(port));
 
             if (listen(fd, SOMAXCONN) < 0)
-                throw std::runtime_error("Erreur listen() TCP");
+                throw std::runtime_error("listen() failed on TCP socket");
 
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute TCP sur le port %u", port);
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] Listening on TCP port %u", port);
             engine_->start_accept_loop(fd, mode);
         }
 
         for (const auto& [path, mode] : unix_paths_) {
             const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-            if (fd < 0) throw std::runtime_error("Erreur creation socket UNIX");
+            if (fd < 0) throw std::runtime_error("Failed to create UNIX socket");
 
             unlink(path.c_str());
 
@@ -58,12 +58,12 @@ namespace servd
             std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
 
             if (bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-                throw std::runtime_error("Erreur bind() sur socket UNIX " + path);
+                throw std::runtime_error("bind() failed on UNIX socket " + path);
 
             if (listen(fd, SOMAXCONN) < 0)
-                throw std::runtime_error("Erreur listen() UNIX");
+                throw std::runtime_error("listen() failed on UNIX socket");
 
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UNIX sur %s", path.c_str());
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] Listening on UNIX socket %s", path.c_str());
             engine_->start_accept_loop(fd, mode);
         }
 
@@ -72,18 +72,18 @@ namespace servd
         }
 
         if (session_bus_) {
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Bus session D-Bus actif");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] D-Bus session bus active");
             engine_->bus_monitor_loop(session_bus_);
         }
 
         if (system_bus_) {
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Bus systeme D-Bus actif");
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] D-Bus system bus active");
             engine_->bus_monitor_loop(system_bus_);
         }
 
         for (const uint16_t port : udp_ports_) {
             const int fd = socket(AF_INET, SOCK_DGRAM, 0);
-            if (fd < 0) throw std::runtime_error("Erreur creation socket UDP");
+            if (fd < 0) throw std::runtime_error("Failed to create UDP socket");
 
             int opt = 1;
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
@@ -94,11 +94,13 @@ namespace servd
             addr.sin_port = htons(port);
 
             if (bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-                throw std::runtime_error("Erreur bind() UDP sur le port " + std::to_string(port));
+                throw std::runtime_error("bind() failed on UDP port " + std::to_string(port));
 
-            SERVD_LOG(Logger::LogLevel::INFO, "[Serveur] Ecoute UDP sur le port %u", port);
+            SERVD_LOG(Logger::LogLevel::INFO, "[Server] Listening on UDP port %u", port);
             engine_->start_udp_loop(fd);
         }
+
+        SERVD_LOG(Logger::LogLevel::INFO, "[Server] Initialization complete");
     }
 
     void Server::run() const

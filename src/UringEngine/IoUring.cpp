@@ -72,7 +72,7 @@ namespace servd
         while (total_read < buffer.size()) {
             const int bytes = co_await async_read(fd, buffer.subspan(total_read));
             if (bytes == 0) {
-                throw std::runtime_error("Connexion fermee par le client");
+                throw std::runtime_error("Connection closed by client");
             }
             total_read += bytes;
         }

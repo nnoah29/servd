@@ -87,6 +87,7 @@ namespace servd
 
         g_signal_received = 0;
         running = true;
+        SERVD_LOG(Logger::LogLevel::INFO, "[UringEngine] Event loop started");
 
         struct io_uring_cqe *cqe;
         while (running && !g_signal_received) {
@@ -110,7 +111,9 @@ namespace servd
         running = false;
 
         if (g_signal_received)
-            SERVD_LOG(Logger::LogLevel::INFO, "[UringEngine] Signal recu, arret du serveur.");
+            SERVD_LOG(Logger::LogLevel::INFO, "[UringEngine] Signal received, shutting down server.");
+
+        SERVD_LOG(Logger::LogLevel::INFO, "[UringEngine] Event loop stopped");
     }
 
 }

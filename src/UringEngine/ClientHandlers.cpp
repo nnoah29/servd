@@ -32,7 +32,7 @@ namespace servd
                 ClientFrame frame = co_await read_frame(client_fd);
 
                 if (!server_.session_store_)
-                    throw std::runtime_error("SessionStore non initialise");
+                    throw std::runtime_error("SessionStore not initialized");
 
                 Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
 
@@ -46,10 +46,12 @@ namespace servd
                 co_await server_.session_store_->save(session);
 
             } catch (const std::exception& e) {
-                SERVD_LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                SERVD_LOG(Logger::LogLevel::WARN, "[Disconnect/Error] Client %d: %s", client_fd, e.what());
                 break;
             }
         }
+
+        SERVD_LOG(Logger::LogLevel::INFO, "[Client] Client %d disconnected", client_fd);
 
         if (current_sid != static_cast<uint64_t>(-1))
             unregister_session(current_sid);
@@ -76,7 +78,7 @@ namespace servd
                 ClientFrame frame = co_await read_text_frame(client_fd);
 
                 if (!server_.session_store_)
-                    throw std::runtime_error("SessionStore non initialise");
+                    throw std::runtime_error("SessionStore not initialized");
 
                 Session session = co_await server_.session_store_->get_or_create(frame.header.session_id);
 
@@ -89,10 +91,12 @@ namespace servd
                 co_await process_command(frame, connection, session);
                 co_await server_.session_store_->save(session);
             } catch (const std::exception& e) {
-                SERVD_LOG(Logger::LogLevel::WARN, "[Deconnexion/Erreur] Client %d : %s", client_fd, e.what());
+                SERVD_LOG(Logger::LogLevel::WARN, "[Disconnect/Error] Client %d: %s", client_fd, e.what());
                 break;
             }
         }
+
+        SERVD_LOG(Logger::LogLevel::INFO, "[Client] Client %d disconnected", client_fd);
 
         if (current_sid != static_cast<uint64_t>(-1))
             unregister_session(current_sid);
@@ -107,12 +111,12 @@ namespace servd
 
                 const int client_fd = co_await async_accept(server_fd);
                 if (server_.max_clients_ > 0 && active_connections_ >= server_.max_clients_) {
-                    SERVD_LOG(Logger::LogLevel::WARN, "[Rejet] Limite de clients atteinte (%zu)", server_.max_clients_);
+                    SERVD_LOG(Logger::LogLevel::WARN, "[Reject] Max client limit reached (%zu)", server_.max_clients_);
                     close(client_fd);
                     continue;
                 }
 
-                SERVD_LOG(Logger::LogLevel::INFO, "[Nouveau Client] FD connecte : %d", client_fd);
+                SERVD_LOG(Logger::LogLevel::INFO, "[New Client] FD connected: %d", client_fd);
 
                 if (mode == ProtocolMode::TEXT)
                     text_handle_client(client_fd);
@@ -120,7 +124,7 @@ namespace servd
                     handle_client(client_fd);
 
             } catch (std::exception& e) {
-                SERVD_LOG(Logger::LogLevel::ERROR, "[Erreur] %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Error] %s", e.what());
             }
         }
     }
@@ -154,7 +158,7 @@ namespace servd
                 co_await server_.session_store_->save(session);
 
             } catch (const std::exception& e) {
-                SERVD_LOG(Logger::LogLevel::ERROR, "[Erreur UDP] %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[UDP Error] %s", e.what());
             }
         }
     }
@@ -186,7 +190,7 @@ namespace servd
             try {
                 co_await handler(server_);
             } catch (const std::exception& e) {
-                SERVD_LOG(Logger::LogLevel::ERROR, "[Timer] Erreur: %s", e.what());
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Timer] Error: %s", e.what());
             }
         }
     }

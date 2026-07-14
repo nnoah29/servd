@@ -57,7 +57,7 @@ namespace servd {
     };
     #pragma pack(pop)
 
-    // Commandes reservées pour la couche sécurité
+    // Reserved commands for the security layer
     inline constexpr uint16_t CMD_KEY_EXCHANGE      = 0x00F0;
     inline constexpr uint16_t CMD_ENCRYPTED_MESSAGE  = 0x00F1;
 }

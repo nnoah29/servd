@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Test du handshake X25519 + AES-256-GCM avec servd.
+"""Test X25519 + AES-256-GCM handshake with servd.
 
-Prérequis:
+Prerequisites:
     pip install cryptography
 
 Usage:
-    # Terminal 1 : lancer le serveur
+    # Terminal 1: start the server
     ./build/servd
 
-    # Terminal 2 : lancer le test
+    # Terminal 2: run the test
     python3 examples/test_encryption.py
 """
 
@@ -30,7 +30,7 @@ def recv_exact(sock, n):
     while len(data) < n:
         chunk = sock.recv(n - len(data))
         if not chunk:
-            raise ConnectionError("Fermeture connexion")
+            raise ConnectionError("Connection closed")
         data += chunk
     return data
 
@@ -48,41 +48,41 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(10)
     sock.connect(("127.0.0.1", 8080))
-    print("[+] Connecté au serveur")
+    print("[+] Connected to server")
 
-    # ── Handshake X25519 ──────────────────────────────────
-    print("[*] Handshake X25519...")
+    # ── X25519 Handshake ──────────────────────────────────
+    print("[*] X25519 handshake...")
     client_sk = X25519PrivateKey.generate()
     client_pk = client_sk.public_key().public_bytes_raw()
 
     send_frame(sock, CMD_KEY_EXCHANGE, client_pk, session_id=42)
-    print("[>] CMD_KEY_EXCHANGE envoyé")
+    print("[>] CMD_KEY_EXCHANGE sent")
 
     cmd, flags, sid, server_pk = recv_frame(sock)
-    assert cmd == CMD_KEY_EXCHANGE, f"Réponse inattendue: {cmd:#x}"
-    print(f"[<] Clé publique serveur reçue ({len(server_pk)} octets)")
+    assert cmd == CMD_KEY_EXCHANGE, f"Unexpected response: {cmd:#x}"
+    print(f"[<] Server public key received ({len(server_pk)} bytes)")
 
     shared = client_sk.exchange(X25519PublicKey.from_public_bytes(server_pk))
-    print(f"[+] Secret partagé: {shared.hex()[:16]}...")
+    print(f"[+] Shared secret: {shared.hex()[:16]}...")
     print()
 
-    # ── Commande chiffrée ────────────────────────────────
-    print("[*] Envoi CMD_PING chiffré...")
+    # ── Encrypted command ────────────────────────────────
+    print("[*] Sending encrypted CMD_PING...")
     inner = struct.pack("<H", CMD_PING) + b"Hello crypte!"
     iv = os.urandom(12)
     aes = AESGCM(shared)
     ct = aes.encrypt(iv, inner, None)  # [ciphertext || tag]
     ct_body = ct[:-16]  # ciphertext sans le tag
-    tag = ct[-16:]     # tag GCM (16 octets)
+    tag = ct[-16:]     # GCM tag (16 bytes)
 
     # Wire format spec: [12B IV][16B Tag][Ciphertext]
     outer_payload = iv + tag + ct_body
     send_frame(sock, CMD_ENCRYPTED_MESSAGE, outer_payload, session_id=42)
-    print(f"[>] CMD_ENCRYPTED_MESSAGE envoyé ({len(outer_payload)} octets)")
+    print(f"[>] CMD_ENCRYPTED_MESSAGE sent ({len(outer_payload)} bytes)")
 
-    # ── Réponse chiffrée ─────────────────────────────────
+    # ── Encrypted response ───────────────────────────────
     cmd, flags, sid, resp = recv_frame(sock)
-    assert cmd == CMD_ENCRYPTED_MESSAGE, f"Réponse pas chiffrée: {cmd:#x}"
+    assert cmd == CMD_ENCRYPTED_MESSAGE, f"Response not encrypted: {cmd:#x}"
 
     # Wire format: [12B IV][16B Tag][Ciphertext] → reassembler pour Botan: [ciphertext || tag]
     resp_iv = resp[:12]
@@ -93,16 +93,16 @@ def main():
     inner_cmd = struct.unpack("<H", plain[:2])[0]
     inner_payload = plain[2:].decode()
 
-    print(f"[<] Réponse déchiffrée:")
+    print(f"[<] Decrypted response:")
     print(f"    inner_command_id: 0x{inner_cmd:04X}")
     print(f"    inner_payload:    {inner_payload}")
     print()
 
-    # ── Vérification ─────────────────────────────────────
+    # ── Verification ─────────────────────────────────────
     if inner_cmd == CMD_PING:
-        print("✅ TEST RÉUSSI — Handshake X25519 + AES-256-GCM fonctionnel")
+        print("✅ TEST PASSED — X25519 handshake + AES-256-GCM functional")
     else:
-        print(f"❌ Erreur: commande inattendue {inner_cmd:#x}")
+        print(f"❌ Error: unexpected command {inner_cmd:#x}")
         sys.exit(1)
 
     sock.close()
