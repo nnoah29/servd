@@ -70,6 +70,7 @@ namespace servd {
             Server& enable_unix_socket(const std::string& path, ProtocolMode mode = ProtocolMode::BINARY);
             Server& enable_discovery(const DiscoveryConfig& config);
             Server& disable_discovery();
+            Server& reenable_discovery();
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
 

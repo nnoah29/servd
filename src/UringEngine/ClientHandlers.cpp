@@ -66,6 +66,12 @@ namespace servd
 
         close(client_fd);
         --active_connections_;
+        if (server_.max_clients_ > 0 && active_connections_ < server_.max_clients_
+            && !server_.discovery_config_.respond_to_clients) {
+            server_.discovery_config_.respond_to_clients = true;
+            server_.reenable_discovery();
+            SERVD_LOG(Logger::LogLevel::INFO, "[Discovery] Re-enabled after disconnect");
+        }
     }
 
     DetachedTask Server::UringEngine::text_handle_client(int client_fd)
@@ -103,6 +109,12 @@ namespace servd
             unregister_session(current_sid);
         close(client_fd);
         --active_connections_;
+        if (server_.max_clients_ > 0 && active_connections_ < server_.max_clients_
+            && !server_.discovery_config_.respond_to_clients) {
+            server_.discovery_config_.respond_to_clients = true;
+            server_.reenable_discovery();
+            SERVD_LOG(Logger::LogLevel::INFO, "[Discovery] Re-enabled after disconnect");
+        }
     }
 
     DetachedTask Server::UringEngine::start_accept_loop(int server_fd, ProtocolMode mode)
@@ -113,6 +125,8 @@ namespace servd
                 const int client_fd = co_await async_accept(server_fd);
                 if (server_.max_clients_ > 0 && active_connections_ >= server_.max_clients_) {
                     SERVD_LOG(Logger::LogLevel::WARN, "[Reject] Max client limit reached (%zu)", server_.max_clients_);
+                    server_.discovery_config_.respond_to_clients = false;
+                    server_.disable_discovery();
                     close(client_fd);
                     continue;
                 }

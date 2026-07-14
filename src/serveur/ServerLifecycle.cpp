@@ -156,7 +156,7 @@ namespace servd
                 discovery_config_.active_announce_if_idle);
             engine_->periodic_timer_loop(interval,
                 [this](Server&) -> Task<void> {
-                    if (engine_->active_connections_ > 0 || discovery_fd_ < 0)
+                    if (engine_->active_connections_ > 0 || discovery_fd_ < 0 || !discovery_enabled_)
                         co_return;
 
                     const auto& cfg = discovery_config_;
