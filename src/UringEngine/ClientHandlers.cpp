@@ -54,6 +54,13 @@ namespace servd
         if (current_sid != static_cast<uint64_t>(-1))
             unregister_session(current_sid);
 
+        if (server_.disconnect_handler_ && current_sid != static_cast<uint64_t>(-1)) {
+            co_await server_.thread_pool().enqueue([sid = current_sid, &srv = server_]() {
+                srv.disconnect_handler_(sid);
+                return 0;
+            });
+        }
+
         close(client_fd);
         --active_connections_;
     }

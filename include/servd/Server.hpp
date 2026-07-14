@@ -42,6 +42,7 @@ namespace servd {
     };
 
     using PeriodicTaskHandler = std::function<Task<void>(class Server& server)>;
+    using DisconnectHandler = std::function<void(uint64_t session_id)>;
 
     struct PeriodicTaskInfo {
         std::chrono::milliseconds interval;
@@ -71,13 +72,14 @@ namespace servd {
 
             Endpoint& add_command(uint16_t command_id, Handler handler);
             void add_periodic_task(std::chrono::milliseconds interval, PeriodicTaskHandler handler);
+            Server& on_disconnect(DisconnectHandler handler);
 
             Task<void> send_to(uint64_t session_id, uint16_t command_id, bytes payload) const;
             Task<void> broadcast(uint16_t command_id, bytes payload) const;
             Task<void> broadcast_if(uint16_t command_id, bytes payload,
                 std::function<bool(const Session&)> predicate) const;
 
-            ThreadPool& thread_pool();
+            ThreadPool& thread_pool() const;
             void enable_thread_pool(size_t thread_count = 4);
 
             void init();
@@ -94,6 +96,7 @@ namespace servd {
             std::vector<std::pair<std::string, ProtocolMode>> unix_paths_;
             DiscoveryConfig discovery_config_;
             std::vector<PeriodicTaskInfo> periodic_tasks_;
+            DisconnectHandler disconnect_handler_;
             size_t max_clients_ = 0;
             std::unordered_map<std::string, uint16_t> text_command_names_;
 

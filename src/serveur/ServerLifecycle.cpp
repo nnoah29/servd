@@ -111,11 +111,17 @@ namespace servd
         engine_->running = false;
     }
 
-    ThreadPool& Server::thread_pool()
+    ThreadPool& Server::thread_pool() const
     {
         if (!thread_pool_)
             throw std::runtime_error("ThreadPool not enabled. Call enable_thread_pool() before init().");
         return *thread_pool_;
+    }
+
+    Server& Server::on_disconnect(DisconnectHandler handler)
+    {
+        disconnect_handler_ = std::move(handler);
+        return *this;
     }
 
     void Server::enable_thread_pool(size_t thread_count)
