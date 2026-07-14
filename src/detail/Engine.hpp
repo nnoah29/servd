@@ -112,6 +112,7 @@ namespace servd
         DetachedTask text_handle_client(int client_fd);
         DetachedTask start_accept_loop(int server_fd, ProtocolMode mode = ProtocolMode::BINARY);
         DetachedTask start_udp_loop(int udp_fd);
+        DetachedTask start_discovery_loop(int udp_fd);
         DetachedTask periodic_timer_loop(std::chrono::milliseconds interval, PeriodicTaskHandler handler);
         DetachedTask bus_monitor_loop(sd_bus* bus);
 

@@ -19,6 +19,7 @@
 #include <span>
 #include <cstdint>
 #include <cstddef>
+#include <netinet/in.h>
 
 #include "servd/Protocol.hpp"
 #include "servd/Task.hpp"
@@ -34,11 +35,19 @@ namespace servd {
 
     using bytes = std::span<const std::byte>;
 
+    using DiscoveryResponder = std::function<void(
+        const struct sockaddr_in& client_addr,
+        DiscoveryPacket& response
+    )>;
+
     struct DiscoveryConfig {
         uint16_t broadcast_port = 9999;
         uint32_t magic_number = 0x53525644;
         bool respond_to_clients = true;
         std::chrono::seconds active_announce_if_idle{0};
+        uint16_t advertised_tcp_port = 0;
+        uint16_t advertised_udp_port = 0;
+        DiscoveryResponder on_discovery_request{};
     };
 
     using PeriodicTaskHandler = std::function<Task<void>(class Server& server)>;
@@ -60,6 +69,7 @@ namespace servd {
             Server& enable_udp(uint16_t port);
             Server& enable_unix_socket(const std::string& path, ProtocolMode mode = ProtocolMode::BINARY);
             Server& enable_discovery(const DiscoveryConfig& config);
+            Server& disable_discovery();
             Server& set_session_store(std::shared_ptr<ISessionStore> store);
             Server& set_authenticator(std::shared_ptr<IAuthenticator> authenticator);
 
@@ -87,6 +97,13 @@ namespace servd {
             void stop() const;
 
         private:
+            void init_defaults();
+            void init_tcp_sockets();
+            void init_unix_sockets();
+            void init_periodic_tasks() const;
+            void init_dbus() const;
+            void init_udp_sockets() const;
+            void init_discovery();
             Router router_;
             std::shared_ptr<ISessionStore> session_store_;
             std::shared_ptr<IAuthenticator> authenticator_;
@@ -95,9 +112,11 @@ namespace servd {
             std::vector<uint16_t> udp_ports_;
             std::vector<std::pair<std::string, ProtocolMode>> unix_paths_;
             DiscoveryConfig discovery_config_;
+            bool discovery_enabled_ = false;
             std::vector<PeriodicTaskInfo> periodic_tasks_;
             DisconnectHandler disconnect_handler_;
             size_t max_clients_ = 0;
+            int discovery_fd_ = -1;
             std::unordered_map<std::string, uint16_t> text_command_names_;
 
             sd_bus* session_bus_ = nullptr;

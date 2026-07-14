@@ -24,6 +24,13 @@ namespace servd
 
     Server& Server::enable_discovery(const DiscoveryConfig& config) {
         discovery_config_ = config;
+        discovery_enabled_ = true;
+        return *this;
+    }
+
+    Server& Server::disable_discovery() {
+        discovery_enabled_ = false;
+        discovery_config_ = DiscoveryConfig{};
         return *this;
     }
 

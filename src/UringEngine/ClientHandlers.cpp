@@ -16,6 +16,7 @@
 #include <array>
 #include <chrono>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <linux/time_types.h>
 #include <systemd/sd-bus.h>
 
@@ -159,6 +160,48 @@ namespace servd
 
             } catch (const std::exception& e) {
                 SERVD_LOG(Logger::LogLevel::ERROR, "[UDP Error] %s", e.what());
+            }
+        }
+    }
+
+    DetachedTask Server::UringEngine::start_discovery_loop(int udp_fd)
+    {
+        while (running) {
+            try {
+                struct sockaddr_storage client_addr{};
+                DiscoveryPacket req{};
+                const size_t bytes = co_await async_recvmsg(udp_fd,
+                    {reinterpret_cast<std::byte*>(&req), sizeof(req)}, client_addr);
+
+                if (bytes < sizeof(DiscoveryPacket)) continue;
+                if (req.magic_number != server_.discovery_config_.magic_number) continue;
+                if (req.action != DiscoveryAction::CLIENT_LOOKING_FOR_SERVER) continue;
+                if (!server_.discovery_config_.respond_to_clients) continue;
+
+                const auto& sin = reinterpret_cast<const struct sockaddr_in&>(client_addr);
+                char ip_str[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &sin.sin_addr, ip_str, sizeof(ip_str));
+                SERVD_LOG(Logger::LogLevel::INFO, "[Discovery] Request from %s:%d",
+                    ip_str, ntohs(sin.sin_port));
+
+                DiscoveryPacket resp{};
+                resp.magic_number = server_.discovery_config_.magic_number;
+                resp.action = DiscoveryAction::SERVER_ANNOUNCING;
+                resp.tcp_port = server_.discovery_config_.advertised_tcp_port
+                    ? server_.discovery_config_.advertised_tcp_port
+                    : (server_.tcp_ports_.empty() ? 0 : server_.tcp_ports_[0].first);
+                resp.udp_port = server_.discovery_config_.advertised_udp_port
+                    ? server_.discovery_config_.advertised_udp_port
+                    : (server_.udp_ports_.empty() ? 0 : server_.udp_ports_[0]);
+
+                if (server_.discovery_config_.on_discovery_request)
+                    server_.discovery_config_.on_discovery_request(sin, resp);
+
+                co_await async_sendto(udp_fd,
+                    {reinterpret_cast<std::byte*>(&resp), sizeof(resp)}, client_addr);
+
+            } catch (const std::exception& e) {
+                SERVD_LOG(Logger::LogLevel::ERROR, "[Discovery] Error: %s", e.what());
             }
         }
     }
